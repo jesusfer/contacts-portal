@@ -1,0 +1,368 @@
+import json
+from functools import wraps
+
+from allauth.core import ratelimit
+from django.conf import settings
+from django.contrib.auth import authenticate, login, logout
+from django.core.exceptions import ObjectDoesNotExist, RequestDataTooBig, ValidationError
+from django.db import IntegrityError, transaction
+from django.db.models import Avg, Count, Q
+from django.http import FileResponse, Http404, JsonResponse
+from django.shortcuts import get_object_or_404
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.csrf import ensure_csrf_cookie
+
+from .forms import AppointmentForm, CallForm, ContactForm, EmailForm
+from .models import Agent, Appointment, Call, Contact, Email
+
+
+def error(message, status=400, **extra):
+    return JsonResponse({"error": message, **extra}, status=status)
+
+
+def csrf_failure(request, reason=""):
+    return error("CSRF verification failed. Refresh your session and try again.", 403)
+
+
+def api(methods, *, agent_required=True):
+    def decorate(view):
+        @wraps(view)
+        def wrapped(request, *args, **kwargs):
+            if request.method not in methods:
+                response = error("Method not allowed.", 405)
+                response["Allow"] = ", ".join(methods)
+                return response
+            if agent_required:
+                if not request.user.is_authenticated:
+                    return error("Authentication required.", 401)
+                try:
+                    request.agent = Agent.objects.select_related("company").get(user=request.user)
+                except Agent.DoesNotExist:
+                    return error("Your account has not been provisioned with an agent.", 403)
+            try:
+                return view(request, *args, **kwargs)
+            except Http404:
+                return error("Not found.", 404)
+            except ValidationError as exc:
+                return error("Validation failed.", fields=getattr(exc, "message_dict", {"__all__": exc.messages}))
+            except IntegrityError:
+                return error("The data conflicts with an existing record or constraint.", 400)
+        return wrapped
+    return decorate
+
+
+def payload(request, schema, *, required=()):
+    if request.content_type != "application/json":
+        raise ValidationError("Content-Type must be application/json.")
+    try:
+        data = json.loads(request.body)
+    except (ValueError, UnicodeDecodeError, RequestDataTooBig) as exc:
+        raise ValidationError("Malformed JSON body.") from exc
+    if not isinstance(data, dict):
+        raise ValidationError("The JSON body must be an object.")
+    unexpected = data.keys() - schema.keys()
+    if unexpected:
+        raise ValidationError("Unknown fields: " + ", ".join(sorted(unexpected)))
+    missing = set(required) - data.keys()
+    if missing:
+        raise ValidationError("Required fields: " + ", ".join(sorted(missing)))
+    for key, value in data.items():
+        if type(value) not in schema[key]:
+            raise ValidationError({key: "Invalid value type."})
+        if key.endswith("_id") and value <= 0:
+            raise ValidationError({key: "Use a positive integer ID."})
+    return data
+
+
+TEXT = (str,)
+ID = (int,)
+BOOL = (bool,)
+RATING = (int, type(None))
+
+
+def save_form(form_class, instance, changes):
+    data = {}
+    for field in form_class.Meta.fields:
+        value = getattr(instance, field)
+        if hasattr(value, "isoformat"):
+            value = value.isoformat()
+        data[field] = value
+    data.update(changes)
+    form = form_class(data=data, instance=instance)
+    if not form.is_valid():
+        raise ValidationError({field: list(messages) for field, messages in form.errors.items()})
+    return form.save()
+
+
+def company_json(company):
+    return {"id": company.pk, "name": company.name}
+
+
+def contact_json(contact, *, company=True):
+    result = {"id": contact.pk, "name": contact.name, "email": contact.email}
+    if company:
+        result["company"] = company_json(contact.company)
+    return result
+
+
+def appointment_fields(appointment):
+    return {
+        "id": appointment.pk,
+        "starts_at": appointment.starts_at.isoformat(),
+        "ends_at": appointment.ends_at.isoformat(),
+        "notes": appointment.notes,
+    }
+
+
+def call_json(call):
+    try:
+        appointment = appointment_fields(call.appointment)
+    except ObjectDoesNotExist:
+        appointment = None
+    return {
+        "id": call.pk,
+        "contact": contact_json(call.contact),
+        "status": call.status,
+        "summary": call.summary,
+        "rating": call.rating,
+        "appointment": appointment,
+    }
+
+
+def appointment_json(appointment):
+    return {
+        **appointment_fields(appointment),
+        "call": {
+            "id": appointment.call_id,
+            "status": appointment.call.status,
+            "contact": contact_json(appointment.call.contact),
+        },
+    }
+
+
+def email_json(email):
+    return {
+        "id": email.pk,
+        "contact": contact_json(email.contact, company=False),
+        "subject": email.subject,
+        "body": email.body,
+        "received_at": email.received_at.isoformat(),
+        "is_read": email.is_read,
+        "is_replied": email.is_replied,
+    }
+
+
+def session_json(request):
+    user = None
+    agent = None
+    if request.user.is_authenticated:
+        user = {
+            "id": request.user.pk,
+            "username": request.user.get_username(),
+            "name": request.user.get_full_name() or request.user.get_username(),
+        }
+        try:
+            profile = Agent.objects.select_related("company").get(user=request.user)
+            agent = {"id": profile.pk, "company": company_json(profile.company)}
+        except Agent.DoesNotExist:
+            pass
+    providers = [
+        {
+            "id": app["provider_id"], "name": app["name"],
+            "login_url": reverse("openid_connect_login", kwargs={"provider_id": app["provider_id"]}),
+        }
+        for app in settings.SOCIALACCOUNT_PROVIDERS["openid_connect"]["APPS"]
+    ]
+    return {"user": user, "agent": agent, "providers": providers}
+
+
+@ensure_csrf_cookie
+@api(["GET"], agent_required=False)
+def session(request):
+    return JsonResponse(session_json(request))
+
+
+@api(["POST"], agent_required=False)
+def password_login(request):
+    data = payload(request, {"username": TEXT, "password": TEXT}, required=("username", "password"))
+    if not ratelimit.consume(request, action="login") or not ratelimit.consume(
+        request, action="login_failed", key=data["username"].casefold(), dry_run=True
+    ):
+        response = error("Too many login attempts. Try again later.", 429)
+        response["Retry-After"] = "300"
+        return response
+    user = authenticate(request, **data)
+    if user is None:
+        ratelimit.consume(request, action="login_failed", key=data["username"].casefold())
+        return error("Invalid username or password.", 401)
+    login(request, user)
+    ratelimit.clear(request, action="login_failed", key=data["username"].casefold())
+    return JsonResponse(session_json(request))
+
+
+@api(["POST"], agent_required=False)
+def session_logout(request):
+    if not request.user.is_authenticated:
+        return error("Authentication required.", 401)
+    logout(request)
+    return JsonResponse(session_json(request))
+
+
+def scoped_contacts(request):
+    return Contact.objects.filter(company=request.agent.company).select_related("company")
+
+
+def scoped_calls(request):
+    return Call.objects.filter(
+        agent=request.agent, contact__company=request.agent.company
+    ).select_related("contact__company", "appointment")
+
+
+def scoped_appointments(request):
+    return Appointment.objects.filter(
+        call__agent=request.agent, call__contact__company=request.agent.company
+    ).select_related("call__contact__company")
+
+
+def scoped_emails(request):
+    return Email.objects.filter(
+        agent=request.agent, contact__company=request.agent.company
+    ).select_related("contact")
+
+
+@api(["GET", "POST"])
+def contacts(request):
+    if request.method == "GET":
+        return JsonResponse({"contacts": [contact_json(item) for item in scoped_contacts(request)]})
+    data = payload(request, {"name": TEXT, "email": TEXT}, required=("name", "email"))
+    contact = save_form(ContactForm, Contact(company=request.agent.company), data)
+    return JsonResponse(contact_json(contact), status=201)
+
+
+@api(["GET", "POST"])
+def calls(request):
+    if request.method == "GET":
+        return JsonResponse({"calls": [call_json(item) for item in scoped_calls(request)]})
+    data = payload(
+        request, {"contact_id": ID, "status": TEXT, "summary": TEXT, "rating": RATING},
+        required=("contact_id",),
+    )
+    contact = get_object_or_404(scoped_contacts(request), pk=data.pop("contact_id"))
+    call = save_form(CallForm, Call(agent=request.agent, contact=contact), data)
+    return JsonResponse(call_json(call), status=201)
+
+
+@api(["GET", "PATCH"])
+def call_detail(request, pk):
+    if request.method == "GET":
+        return JsonResponse(call_json(get_object_or_404(scoped_calls(request), pk=pk)))
+    data = payload(request, {"status": TEXT, "summary": TEXT, "rating": RATING})
+    with transaction.atomic():
+        call = get_object_or_404(scoped_calls(request).select_for_update(), pk=pk)
+        if "status" in data and data["status"] != Call.Status.COMPLETED and "rating" not in data:
+            data["rating"] = None
+        call = save_form(CallForm, call, data)
+    return JsonResponse(call_json(call))
+
+
+@api(["GET", "POST"])
+def appointments(request):
+    if request.method == "GET":
+        return JsonResponse({"appointments": [appointment_json(item) for item in scoped_appointments(request)]})
+    data = payload(
+        request, {"call_id": ID, "starts_at": TEXT, "ends_at": TEXT, "notes": TEXT},
+        required=("call_id", "starts_at", "ends_at"),
+    )
+    call = get_object_or_404(scoped_calls(request), pk=data.pop("call_id"))
+    appointment = save_form(AppointmentForm, Appointment(call=call), data)
+    return JsonResponse(appointment_json(appointment), status=201)
+
+
+@api(["GET", "PATCH"])
+def appointment_detail(request, pk):
+    if request.method == "GET":
+        return JsonResponse(appointment_json(get_object_or_404(scoped_appointments(request), pk=pk)))
+    data = payload(request, {"starts_at": TEXT, "ends_at": TEXT, "notes": TEXT})
+    with transaction.atomic():
+        appointment = get_object_or_404(scoped_appointments(request).select_for_update(), pk=pk)
+        appointment = save_form(AppointmentForm, appointment, data)
+        appointment.refresh_from_db()
+    return JsonResponse(appointment_json(appointment))
+
+
+@api(["GET", "POST"])
+def inbox(request):
+    if request.method == "GET":
+        return JsonResponse({"emails": [email_json(item) for item in scoped_emails(request)]})
+    data = payload(
+        request,
+        {
+            "contact_id": ID, "subject": TEXT, "body": TEXT, "received_at": TEXT,
+            "is_read": BOOL, "is_replied": BOOL,
+        },
+        required=("contact_id", "subject"),
+    )
+    contact = get_object_or_404(scoped_contacts(request), pk=data.pop("contact_id"))
+    email = save_form(EmailForm, Email(agent=request.agent, contact=contact, received_at=timezone.now()), data)
+    return JsonResponse(email_json(email), status=201)
+
+
+@api(["PATCH"])
+def inbox_detail(request, pk):
+    data = payload(request, {"is_read": BOOL, "is_replied": BOOL})
+    with transaction.atomic():
+        email = get_object_or_404(scoped_emails(request).select_for_update(), pk=pk)
+        # These flags track activity only; this endpoint never sends email.
+        email = save_form(EmailForm, email, data)
+    return JsonResponse(email_json(email))
+
+
+def aggregates():
+    return {
+        "total_calls": Count("id"),
+        "completed_calls": Count("id", filter=Q(status=Call.Status.COMPLETED)),
+        "average_rating": Avg("rating", filter=Q(status=Call.Status.COMPLETED)),
+    }
+
+
+@api(["GET"])
+def kpis(request):
+    queryset = scoped_calls(request).order_by()
+    totals = queryset.aggregate(
+        **aggregates(),
+        non_scheduled=Count("id", filter=~Q(status=Call.Status.SCHEDULED)),
+        missed=Count("id", filter=Q(status=Call.Status.MISSED)),
+        rescheduled=Count("id", filter=Q(status=Call.Status.RESCHEDULED)),
+    )
+    denominator = totals.pop("non_scheduled")
+    totals["missed_percentage"] = 100 * totals.pop("missed") / denominator if denominator else 0
+    totals["rescheduled_percentage"] = 100 * totals.pop("rescheduled") / denominator if denominator else 0
+    for key, prefix in (("by_contact", "contact"), ("by_company", "contact__company")):
+        rows = queryset.values(f"{prefix}__id", f"{prefix}__name").annotate(**aggregates()).order_by(
+            f"{prefix}__name", f"{prefix}__id"
+        )
+        totals[key] = [
+            {
+                "id": row.pop(f"{prefix}__id"),
+                "name": row.pop(f"{prefix}__name"),
+                **row,
+            }
+            for row in rows
+        ]
+    return JsonResponse(totals)
+
+
+def spa(request):
+    if request.method not in ("GET", "HEAD"):
+        return error("Method not allowed.", 405)
+    index = settings.FRONTEND_DIST / "index.html"
+    if not index.is_file():
+        return error("Frontend build unavailable. Build frontend/dist first.", 503)
+    response = FileResponse(index.open("rb"), content_type="text/html")
+    response["Cache-Control"] = "no-cache"
+    return response
+
+
+def not_found(request, exception=None):
+    return error("Not found.", 404)
