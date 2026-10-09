@@ -421,6 +421,27 @@ class APITests(TestCase):
         self.call.refresh_from_db()
         self.assertTrue(self.call.was_rescheduled)
 
+    def test_rescheduled_reset_to_scheduled_excluded_until_completed(self):
+        path = f"/api/calls/{self.call.id}/"
+        self.assertEqual(self.send("patch", path, {"status": "rescheduled"}).status_code, 200)
+        response = self.send("patch", path, {"status": "scheduled"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["was_rescheduled"])
+        Call.objects.create(agent=self.agent, contact=self.contact, status="missed")
+        result = self.client.get("/api/kpis/").json()
+        self.assertEqual(result["total_calls"], 2)
+        self.assertEqual(result["missed_percentage"], 100)
+        self.assertEqual(result["rescheduled_percentage"], 0)
+        self.assertEqual(self.send(
+            "patch", path, {"status": "completed", "rating": 4}
+        ).status_code, 200)
+        result = self.client.get("/api/kpis/").json()
+        self.assertEqual(result["rescheduled_percentage"], 50)
+        self.assertEqual(result["missed_percentage"], 50)
+        for metric in ("missed_percentage", "rescheduled_percentage"):
+            self.assertGreaterEqual(result[metric], 0)
+            self.assertLessEqual(result[metric], 100)
+
     def test_spa_missing_build_and_reserved_routes(self):
         with override_settings(FRONTEND_DIST=Path("crm/nonexistent-frontend")):
             self.assertEqual(self.client.get("/dashboard").status_code, 503)

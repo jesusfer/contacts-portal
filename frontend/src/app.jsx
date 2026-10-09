@@ -139,10 +139,13 @@ function CallDetail({ id, version, refresh, openCreate }) {
   return <><a class="back" href="#/calls">← Back to call log</a><PageHeading title={`Conversation with ${call.contact.name}`} eyebrow={`Call #${call.id}`} subtitle={call.contact.company?.name || call.contact.email}/><div class="detail-grid"><Panel title="Conversation details"><div class="panel-body"><ErrorNotice error={error}/>{saved && <div class="success" role="status">Conversation updated.</div>}<form class="form" onSubmit={save}><CallFields {...{status,setStatus,summary,setSummary,rating,setRating}}/><div class="actions"><button class="button" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button><a class="button secondary" href="#/calls">Back to calls</a></div></form></div></Panel><div><Panel title="Contact"><div class="panel-body"><Contact contact={call.contact}/><dl><div class="info-row"><dt>Email</dt><dd><a class="link" href={`mailto:${call.contact.email}`}>{call.contact.email}</a></dd></div><div class="info-row"><dt>Company</dt><dd>{call.contact.company?.name || '—'}</dd></div></dl></div></Panel><Panel title="Appointment"><div class="panel-body">{call.appointment ? <><p>{dateTime(call.appointment.starts_at)}</p><p class="muted" style="margin:6px 0 17px">Until {time(call.appointment.ends_at)}</p><a class="button secondary" href={`#/appointments/${call.appointment.id}`}>View or reschedule</a></> : <><p class="muted" style="margin-bottom:17px">No appointment scheduled for this conversation.</p><button class="button secondary" onClick={() => openCreate('appointment', call.id)}>Schedule appointment</button></>}</div></Panel></div></div></>
 }
 function AppointmentFields({ starts, setStarts, ends, setEnds, notes, setNotes }) { return <><div class="form-grid"><label>Starts at<input type="datetime-local" value={starts} onInput={e => setStarts(e.target.value)} required/></label><label>Ends at<input type="datetime-local" value={ends} onInput={e => setEnds(e.target.value)} required min={starts || undefined}/></label></div><p class="form-help">Times are shown in your local timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). They are saved in UTC.</p><label>Appointment notes<textarea value={notes} onInput={e => setNotes(e.target.value)} placeholder="An agenda, a reminder, or a little context…"/></label></> }
-function appointmentPayload(starts, ends, notes) {
-  const start = new Date(starts), end = new Date(ends)
-  if (!starts || !ends || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) throw new Error('Choose an end time after the start time.')
-  return { starts_at: start.toISOString(), ends_at: end.toISOString(), notes }
+function appointmentPayload(starts, ends, notes, original = null) {
+  const unchangedStart = original && starts === localInput(original.starts_at)
+  const unchangedEnd = original && ends === localInput(original.ends_at)
+  const start = new Date(unchangedStart ? original.starts_at : starts)
+  const end = new Date(unchangedEnd ? original.ends_at : ends)
+  if (!starts || !ends || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || (!(unchangedStart && unchangedEnd) && end <= start)) throw new Error('Choose an end time after the start time.')
+  return { starts_at: unchangedStart ? original.starts_at : start.toISOString(), ends_at: unchangedEnd ? original.ends_at : end.toISOString(), notes }
 }
 function AppointmentDetail({ id, version, refresh }) {
   const r = useResource(`appointments/${id}/`, version)
@@ -150,7 +153,7 @@ function AppointmentDetail({ id, version, refresh }) {
   useEffect(() => { if (r.data) { setStarts(localInput(r.data.starts_at)); setEnds(localInput(r.data.ends_at)); setNotes(r.data.notes || '') } }, [r.data])
   async function save(e) {
     e.preventDefault(); setBusy(true); setError(''); setSaved(false)
-    try { await api(`appointments/${id}/`, { method:'PATCH',body:appointmentPayload(starts,ends,notes) }); setSaved(true); refresh() } catch(err) { setError(err.message) } finally { setBusy(false) }
+    try { await api(`appointments/${id}/`, { method:'PATCH',body:appointmentPayload(starts,ends,notes,r.data) }); setSaved(true); refresh() } catch(err) { setError(err.message) } finally { setBusy(false) }
   }
   if (r.loading) return <Loading/>
   if (r.error) return <ErrorNotice error={r.error} retry={r.retry}/>

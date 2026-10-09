@@ -340,7 +340,11 @@ def kpis(request):
         **aggregates(),
         non_scheduled=Count("id", filter=~Q(status=Call.Status.SCHEDULED)),
         missed=Count("id", filter=Q(status=Call.Status.MISSED)),
-        rescheduled=Count("id", filter=Q(was_rescheduled=True) | Q(status=Call.Status.RESCHEDULED)),
+        rescheduled=Count(
+            "id",
+            filter=(Q(was_rescheduled=True) | Q(status=Call.Status.RESCHEDULED))
+            & ~Q(status=Call.Status.SCHEDULED),
+        ),
     )
     denominator = totals.pop("non_scheduled")
     totals["missed_percentage"] = 100 * totals.pop("missed") / denominator if denominator else 0
