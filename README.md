@@ -1,6 +1,6 @@
 # Contacts Portal
 
-A Django + Preact CRM for agents, company contacts, calls, appointments, and
+A Django 6 + Preact CRM for agents, company contacts, calls, appointments, and
 inbox tracking. Django sessions protect the JSON API; SQLite stores application
 data. The same container serves the frontend and Django static files using
 WhiteNoise.
@@ -33,6 +33,15 @@ The image runs as UID/GID 10001. If using bind mounts instead of named volumes,
 ensure both mounted directories are writable by that user. Media is persistent
 but is not exposed publicly by WhiteNoise. Profile pictures are served through
 an authenticated, private endpoint.
+
+## Automated image builds
+
+The **Build Docker image** GitHub Actions workflow builds the Dockerfile on
+pushes to `main` that change `crm/`, `frontend/`, or `Dockerfile`. It also
+watches the remaining image inputs (`config/`, Python requirements, `manage.py`,
+the entrypoint, `.dockerignore`) and its own workflow definition.
+Builds use GitHub Actions caching and commit-SHA image tags. This workflow
+validates the image build only; it does not publish an image to a registry.
 
 ## Local development
 
