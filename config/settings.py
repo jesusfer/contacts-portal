@@ -22,7 +22,9 @@ ALLOWED_HOSTS = [
 ]
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
-    for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
+    for origin in os.environ.get(
+        "DJANGO_CSRF_TRUSTED_ORIGINS", os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+    ).split(",")
     if origin.strip()
 ]
 
@@ -132,10 +134,11 @@ SOCIALACCOUNT_LOGIN_ON_GET = False
 ACCOUNT_RATE_LIMITS = {"login": "20/m/ip", "login_failed": "5/5m/key"}
 CSRF_FAILURE_VIEW = "crm.views.csrf_failure"
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
+SECURE_COOKIES = os.environ.get("DJANGO_SECURE_COOKIES", str(not DEBUG)).lower() in {"1", "true", "yes"}
+SESSION_COOKIE_SECURE = SECURE_COOKIES
+CSRF_COOKIE_SECURE = SECURE_COOKIES
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_SSL_REDIRECT = not DEBUG
+SECURE_SSL_REDIRECT = os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "false").lower() in {"1", "true", "yes"}
 if os.environ.get("DJANGO_TRUST_PROXY", "false").lower() in {"1", "true", "yes"}:
     # Enable only behind a trusted proxy that overwrites the forwarded header.
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

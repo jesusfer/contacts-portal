@@ -2,7 +2,7 @@ from django import forms
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Appointment, Call, Contact, Email
+from .models import Appointment, Call, Company, Contact, Email
 
 
 class ISODateTimeField(forms.DateTimeField):
@@ -16,6 +16,12 @@ class ISODateTimeField(forms.DateTimeField):
         if result is None or timezone.is_naive(result):
             raise forms.ValidationError("Use an ISO 8601 timestamp with a timezone.")
         return result
+
+
+class CompanyForm(forms.ModelForm):
+    class Meta:
+        model = Company
+        fields = ["name"]
 
 
 class ContactForm(forms.ModelForm):

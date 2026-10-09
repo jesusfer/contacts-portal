@@ -1,6 +1,12 @@
 import json
+import io
+import os
+import secrets
+import subprocess
+import sys
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.models import SocialAccount, SocialLogin
@@ -49,6 +55,9 @@ class APITests(TestCase):
         cls.peer_appointment = Appointment.objects.create(
             call=cls.peer_call, starts_at=cls.start, ends_at=cls.start + timedelta(hours=1)
         )
+        cls.other_appointment = Appointment.objects.create(
+            call=cls.other_call, starts_at=cls.start, ends_at=cls.start + timedelta(hours=1)
+        )
         cls.email = Email.objects.create(agent=cls.agent, contact=cls.contact, subject="Hello")
         cls.peer_email = Email.objects.create(agent=cls.peer_agent, contact=cls.contact, subject="Private")
         cls.other_email = Email.objects.create(
@@ -75,7 +84,7 @@ class APITests(TestCase):
         self.assertEqual(response["user"]["username"], "agent")
         self.client.force_login(self.unprovisioned)
         self.assertIsNone(self.client.get("/api/session/").json()["agent"])
-        for path in ("contacts", "calls", "appointments", "inbox", "kpis"):
+        for path in ("companies", "contacts", "calls", "appointments", "inbox", "kpis"):
             self.assertEqual(self.client.get(f"/api/{path}/").status_code, 403)
 
     def test_unauthenticated_apis_and_methods(self):
@@ -123,17 +132,47 @@ class APITests(TestCase):
             "post", "/api/login/", {"username": "agent", "password": "test-passphrase-123"}
         ).status_code, 401)
 
-    def test_contact_company_scope_and_creation(self):
+    def test_shared_contact_directory_and_creation_for_selected_company(self):
         result = self.client.get("/api/contacts/").json()["contacts"]
-        self.assertEqual([item["id"] for item in result], [self.contact.id])
-        response = self.send("post", "/api/contacts/", {"name": "New", "email": "new@example.com"})
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["company"]["id"], self.company.id)
-        self.assertEqual(self.send(
+        self.assertEqual([item["id"] for item in result], [self.contact.id, self.other_contact.id])
+        response = self.send(
             "post", "/api/contacts/",
             {"name": "New", "email": "new@example.com", "company_id": self.other_company.id},
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["company"]["id"], self.other_company.id)
+        self.assertEqual(self.send(
+            "post", "/api/contacts/", {"name": "Missing company", "email": "missing@example.com"}
         ).status_code, 400)
-        self.assertEqual(self.send("post", "/api/contacts/", {"name": "New", "email": "bad"}).status_code, 400)
+        self.assertEqual(self.send(
+            "post", "/api/contacts/",
+            {"name": "New", "email": "new@example.com", "company_id": 999999},
+        ).status_code, 404)
+        self.assertEqual(self.send(
+            "post", "/api/contacts/", {"name": "New", "email": "bad", "company_id": self.company.id}
+        ).status_code, 400)
+        self.assertEqual(self.send(
+            "post", "/api/contacts/",
+            {"name": "New", "email": "new@example.com", "company_id": self.company.id, "agent_id": self.peer_agent.id},
+        ).status_code, 400)
+
+    def test_shared_company_directory_and_creation(self):
+        result = self.client.get("/api/companies/").json()["companies"]
+        self.assertEqual(result, [
+            {"id": self.company.id, "name": "First"}, {"id": self.other_company.id, "name": "Second"},
+        ])
+        response = self.send("post", "/api/companies/", {"name": "Third"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["name"], "Third")
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.company_id, self.company.id)
+        self.assertEqual(self.send("post", "/api/companies/", {"name": ""}).status_code, 400)
+        self.assertEqual(self.send(
+            "post", "/api/companies/", {"name": "New", "agent_id": self.agent.id}
+        ).status_code, 400)
+        self.client.logout()
+        self.assertEqual(self.client.get("/api/companies/").status_code, 401)
+        self.assertEqual(self.send("post", "/api/companies/", {"name": "New"}).status_code, 401)
 
     def test_all_list_endpoints_exclude_other_agents(self):
         self.assertEqual([item["id"] for item in self.client.get("/api/calls/").json()["calls"]], [self.call.id])
@@ -147,24 +186,49 @@ class APITests(TestCase):
         for path in (
             f"/api/calls/{self.peer_call.id}/", f"/api/calls/{self.other_call.id}/",
             f"/api/appointments/{self.peer_appointment.id}/",
+            f"/api/appointments/{self.other_appointment.id}/",
         ):
             self.assertEqual(self.client.get(path).status_code, 404)
             self.assertEqual(self.send("patch", path, {}).status_code, 404)
         for email in (self.peer_email, self.other_email):
             self.assertEqual(self.send("patch", f"/api/inbox/{email.id}/", {}).status_code, 404)
 
-    def test_creation_relations_are_scoped(self):
-        self.assertEqual(self.send(
+    def test_cross_company_contacts_allowed_and_activity_relations_owned(self):
+        response = self.send(
             "post", "/api/calls/", {"contact_id": self.other_contact.id}
-        ).status_code, 404)
-        self.assertEqual(self.send(
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["contact"]["company"]["id"], self.other_company.id)
+        self.assertEqual(Call.objects.get(pk=response.json()["id"]).agent_id, self.agent.id)
+        own_call = response.json()["id"]
+        self.assertEqual(self.client.get(f"/api/calls/{own_call}/").status_code, 200)
+        response = self.send(
             "post", "/api/inbox/", {"contact_id": self.other_contact.id, "subject": "Bad"}
-        ).status_code, 404)
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Email.objects.get(pk=response.json()["id"]).agent_id, self.agent.id)
+        imported_email = response.json()["id"]
+        self.assertEqual(self.send(
+            "patch", f"/api/inbox/{imported_email}/", {"is_read": True}
+        ).status_code, 200)
+        self.assertEqual(self.send(
+            "post", "/api/appointments/",
+            {"call_id": own_call, "starts_at": self.start.isoformat(),
+             "ends_at": (self.start + timedelta(hours=1)).isoformat()},
+        ).status_code, 201)
         self.assertEqual(self.send(
             "post", "/api/appointments/",
             {"call_id": self.peer_call.id, "starts_at": self.start.isoformat(),
              "ends_at": (self.start + timedelta(hours=1)).isoformat()},
         ).status_code, 404)
+        self.assertEqual(self.send("post", "/api/calls/", {"contact_id": 999999}).status_code, 404)
+        self.assertEqual(self.send(
+            "post", "/api/calls/", {"contact_id": self.other_contact.id, "agent_id": self.other_agent.id}
+        ).status_code, 400)
+        self.assertEqual(self.send(
+            "post", "/api/inbox/",
+            {"contact_id": self.other_contact.id, "subject": "Spoofed", "agent_id": self.other_agent.id},
+        ).status_code, 400)
 
     def test_call_creation_and_patch(self):
         response = self.send("post", "/api/calls/", {"contact_id": self.contact.id, "summary": "Planned"})
@@ -179,6 +243,11 @@ class APITests(TestCase):
         self.assertEqual(response.json()["rating"], 4)
         self.assertEqual(response.json()["appointment"]["id"], self.appointment.id)
         response = self.send("patch", f"/api/calls/{self.call.id}/", {"status": "missed"})
+        self.assertEqual(response.status_code, 400)
+        self.call.refresh_from_db()
+        self.assertEqual(self.call.status, "completed")
+        self.assertEqual(self.call.rating, 4)
+        response = self.send("patch", f"/api/calls/{self.call.id}/", {"status": "missed", "rating": None})
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["rating"])
         self.assertEqual(self.send(
@@ -242,7 +311,11 @@ class APITests(TestCase):
         self.call.rating = 5
         self.call.save()
         response = self.send("patch", path, {"ends_at": (self.start + timedelta(hours=3)).isoformat()})
-        self.assertEqual(response.json()["call"]["status"], "completed")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.send("patch", path, {"notes": "Cannot change notes"}).status_code, 400)
+        self.assertEqual(self.send("patch", path, {}).status_code, 200)
+        self.appointment.refresh_from_db()
+        self.assertEqual(self.appointment.ends_at, self.start + timedelta(hours=2))
         self.call.refresh_from_db()
         self.assertEqual(self.call.rating, 5)
         for status in ("missed", "cancelled"):
@@ -283,17 +356,24 @@ class APITests(TestCase):
         for status, rating in (("completed", 5), ("completed", 3), ("completed", None),
                                ("missed", None), ("rescheduled", None), ("cancelled", None)):
             Call.objects.create(agent=self.agent, contact=self.contact, status=status, rating=rating)
+        Call.objects.create(agent=self.agent, contact=self.other_contact, status="completed", rating=1)
         Call.objects.create(agent=self.peer_agent, contact=self.contact, status="completed", rating=1)
         result = self.client.get("/api/kpis/").json()
-        self.assertEqual(result["total_calls"], 7)
-        self.assertEqual(result["completed_calls"], 3)
-        self.assertEqual(result["average_rating"], 4)
-        self.assertAlmostEqual(result["missed_percentage"], 100 / 6)
-        self.assertAlmostEqual(result["rescheduled_percentage"], 100 / 6)
+        self.assertEqual(result["total_calls"], 8)
+        self.assertEqual(result["completed_calls"], 4)
+        self.assertEqual(result["average_rating"], 3)
+        self.assertAlmostEqual(result["missed_percentage"], 100 / 7)
+        self.assertAlmostEqual(result["rescheduled_percentage"], 100 / 7)
         for dimension, identifier in (("by_contact", self.contact.id), ("by_company", self.company.id)):
+            self.assertEqual(len(result[dimension]), 2)
             self.assertEqual(result[dimension][0]["id"], identifier)
             self.assertEqual(result[dimension][0]["average_rating"], 4)
             self.assertEqual(result[dimension][0]["total_calls"], 7)
+            self.assertEqual(result[dimension][1]["average_rating"], 1)
+            self.assertEqual(result[dimension][1]["total_calls"], 1)
+            self.assertEqual(result[dimension][1]["completed_calls"], 1)
+        self.assertEqual(result["by_company"][1]["id"], self.other_company.id)
+        self.assertEqual(result["by_company"][1]["name"], "Second")
 
     def test_empty_kpis(self):
         Call.objects.filter(agent=self.agent).delete()
@@ -309,6 +389,18 @@ class APITests(TestCase):
             self.assertEqual(self.client.get("/dashboard").status_code, 503)
             self.assertEqual(self.client.get("/api/unknown/").status_code, 404)
             self.assertEqual(self.client.get("/static/unknown.js").status_code, 404)
+
+    def test_spa_serves_built_html_and_preserves_static_asset_urls(self):
+        html = b'<html><script type="module" src="/static/assets/app.js"></script></html>'
+        with patch("pathlib.Path.is_file", return_value=True), patch(
+            "pathlib.Path.open", return_value=io.BytesIO(html)
+        ):
+            response = self.client.get("/dashboard")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(b"".join(response.streaming_content), html)
+            self.assertEqual(response["Content-Type"], "text/html")
+        from django.conf import settings
+        self.assertEqual(settings.STATIC_URL, "/static/")
 
 
 class ModelTests(TestCase):
@@ -349,22 +441,29 @@ class ModelTests(TestCase):
         appointment.save()
         call.refresh_from_db()
         self.assertEqual(call.status, "rescheduled")
+        call.status = "completed"
+        call.save()
+        appointment.notes = "Immutable"
+        with self.assertRaises(ValidationError):
+            appointment.save()
 
-    def test_cross_company_model_validation_and_reassignment(self):
+    def test_cross_company_models_and_independent_company_reassignment(self):
         other = Contact.objects.create(name="Other", email="other@example.com", company=self.other_company)
         for model in (
             Call(agent=self.agent, contact=other),
-            Email(agent=self.agent, contact=other, subject="Invalid"),
+            Email(agent=self.agent, contact=other, subject="Cross-company"),
         ):
-            with self.assertRaises(ValidationError):
-                model.save()
+            model.save()
+            self.assertIsNotNone(model.pk)
         Call.objects.create(agent=self.agent, contact=self.contact)
         self.contact.company = self.other_company
-        with self.assertRaises(ValidationError):
-            self.contact.save()
+        self.contact.save()
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.company, self.other_company)
         self.agent.company = self.other_company
-        with self.assertRaises(ValidationError):
-            self.agent.save()
+        self.agent.save()
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.company, self.other_company)
 
     def test_full_domain_and_social_accounts_registered_in_admin(self):
         for model in (Company, Contact, Agent, Call, Appointment, Email, SocialAccount):
@@ -372,6 +471,58 @@ class ModelTests(TestCase):
 
 
 class OIDCSettingsTests(TestCase):
+    def test_documented_docker_environment_names(self):
+        env = os.environ.copy()
+        env.update(
+            DJANGO_DEBUG="0",
+            DJANGO_SECRET_KEY=secrets.token_urlsafe(64),
+            DJANGO_ALLOWED_HOSTS="portal.example, localhost",
+            DJANGO_CSRF_TRUSTED_ORIGINS="https://portal.example, https://second.example",
+            DJANGO_SETTINGS_MODULE="config.settings",
+        )
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "from django.conf import settings; "
+             "assert settings.DEBUG is False; "
+             "assert settings.ALLOWED_HOSTS == ['portal.example', 'localhost']; "
+             "assert settings.CSRF_TRUSTED_ORIGINS == ['https://portal.example', 'https://second.example']; "
+             "assert settings.STATIC_URL == '/static/'"],
+            env=env, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_secure_cookie_redirect_and_proxy_environment_defaults(self):
+        env = os.environ.copy()
+        env.update(
+            DJANGO_DEBUG="0", DJANGO_SECRET_KEY=secrets.token_urlsafe(64),
+            DJANGO_SETTINGS_MODULE="config.settings",
+        )
+        for name in ("DJANGO_SECURE_COOKIES", "DJANGO_SECURE_SSL_REDIRECT", "DJANGO_TRUST_PROXY"):
+            env.pop(name, None)
+        cases = [
+            ({}, True, False, None),
+            ({"DJANGO_DEBUG": "1"}, False, False, None),
+            ({"DJANGO_SECURE_COOKIES": "0"}, False, False, None),
+            (
+                {"DJANGO_SECURE_COOKIES": "1", "DJANGO_SECURE_SSL_REDIRECT": "1", "DJANGO_TRUST_PROXY": "1"},
+                True, True, ("HTTP_X_FORWARDED_PROTO", "https"),
+            ),
+        ]
+        for changes, cookies, redirect, proxy in cases:
+            process_env = env | changes
+            code = (
+                "from django.conf import settings; "
+                f"assert settings.SESSION_COOKIE_SECURE is {cookies!r}; "
+                f"assert settings.CSRF_COOKIE_SECURE is {cookies!r}; "
+                f"assert settings.SECURE_SSL_REDIRECT is {redirect!r}; "
+                f"assert settings.SECURE_PROXY_SSL_HEADER == {proxy!r}"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", code], env=process_env,
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def providers(self):
         return [
             {"id": "work", "name": "Work", "server_url": "https://issuer.example/",

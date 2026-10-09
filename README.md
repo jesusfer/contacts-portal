@@ -69,7 +69,10 @@ npm audit
 ## Authentication and OIDC
 
 Local authentication uses Django usernames/passwords; public password signup
-is disabled. OIDC uses django-allauth's OpenID Connect provider. Configure
+is disabled. Login throttling uses Django's default process-local cache, so its
+limits apply independently to each worker; put shared rate limiting at the
+reverse proxy for an internet-facing deployment.
+OIDC uses django-allauth's OpenID Connect provider. Configure
 `OIDC_PROVIDERS` as a JSON array in the environment (or a single-quoted value
 in `.env`), with one object per identity provider:
 

@@ -13,8 +13,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from .forms import AppointmentForm, CallForm, ContactForm, EmailForm
-from .models import Agent, Appointment, Call, Contact, Email
+from .forms import AppointmentForm, CallForm, CompanyForm, ContactForm, EmailForm
+from .models import Agent, Appointment, Call, Company, Contact, Email
 
 
 def error(message, status=400, **extra):
@@ -209,34 +209,41 @@ def session_logout(request):
     return JsonResponse(session_json(request))
 
 
-def scoped_contacts(request):
-    return Contact.objects.filter(company=request.agent.company).select_related("company")
+def directory_contacts():
+    return Contact.objects.select_related("company")
 
 
 def scoped_calls(request):
-    return Call.objects.filter(
-        agent=request.agent, contact__company=request.agent.company
-    ).select_related("contact__company", "appointment")
+    return Call.objects.filter(agent=request.agent).select_related("contact__company", "appointment")
 
 
 def scoped_appointments(request):
-    return Appointment.objects.filter(
-        call__agent=request.agent, call__contact__company=request.agent.company
-    ).select_related("call__contact__company")
+    return Appointment.objects.filter(call__agent=request.agent).select_related("call__contact__company")
 
 
 def scoped_emails(request):
-    return Email.objects.filter(
-        agent=request.agent, contact__company=request.agent.company
-    ).select_related("contact")
+    return Email.objects.filter(agent=request.agent).select_related("contact")
+
+
+@api(["GET", "POST"])
+def companies(request):
+    if request.method == "GET":
+        return JsonResponse({"companies": [company_json(item) for item in Company.objects.all()]})
+    data = payload(request, {"name": TEXT}, required=("name",))
+    company = save_form(CompanyForm, Company(), data)
+    return JsonResponse(company_json(company), status=201)
 
 
 @api(["GET", "POST"])
 def contacts(request):
     if request.method == "GET":
-        return JsonResponse({"contacts": [contact_json(item) for item in scoped_contacts(request)]})
-    data = payload(request, {"name": TEXT, "email": TEXT}, required=("name", "email"))
-    contact = save_form(ContactForm, Contact(company=request.agent.company), data)
+        return JsonResponse({"contacts": [contact_json(item) for item in directory_contacts()]})
+    data = payload(
+        request, {"name": TEXT, "email": TEXT, "company_id": ID},
+        required=("name", "email", "company_id"),
+    )
+    company = get_object_or_404(Company, pk=data.pop("company_id"))
+    contact = save_form(ContactForm, Contact(company=company), data)
     return JsonResponse(contact_json(contact), status=201)
 
 
@@ -248,7 +255,7 @@ def calls(request):
         request, {"contact_id": ID, "status": TEXT, "summary": TEXT, "rating": RATING},
         required=("contact_id",),
     )
-    contact = get_object_or_404(scoped_contacts(request), pk=data.pop("contact_id"))
+    contact = get_object_or_404(directory_contacts(), pk=data.pop("contact_id"))
     call = save_form(CallForm, Call(agent=request.agent, contact=contact), data)
     return JsonResponse(call_json(call), status=201)
 
@@ -260,8 +267,6 @@ def call_detail(request, pk):
     data = payload(request, {"status": TEXT, "summary": TEXT, "rating": RATING})
     with transaction.atomic():
         call = get_object_or_404(scoped_calls(request).select_for_update(), pk=pk)
-        if "status" in data and data["status"] != Call.Status.COMPLETED and "rating" not in data:
-            data["rating"] = None
         call = save_form(CallForm, call, data)
     return JsonResponse(call_json(call))
 
@@ -303,7 +308,7 @@ def inbox(request):
         },
         required=("contact_id", "subject"),
     )
-    contact = get_object_or_404(scoped_contacts(request), pk=data.pop("contact_id"))
+    contact = get_object_or_404(directory_contacts(), pk=data.pop("contact_id"))
     email = save_form(EmailForm, Email(agent=request.agent, contact=contact, received_at=timezone.now()), data)
     return JsonResponse(email_json(email), status=201)
 

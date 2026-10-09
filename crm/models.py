@@ -37,30 +37,12 @@ class Contact(ValidatedModel):
     def __str__(self):
         return self.name
 
-    def clean(self):
-        super().clean()
-        if self.pk and self.company_id:
-            if self.calls.exclude(agent__company_id=self.company_id).exists() or self.emails.exclude(
-                agent__company_id=self.company_id
-            ).exists():
-                raise ValidationError({"company": "Existing calls or emails belong to another company."})
-
-
 class Agent(ValidatedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agent")
     company = models.ForeignKey(Company, on_delete=models.PROTECT, related_name="agents")
 
     def __str__(self):
         return self.user.get_username()
-
-    def clean(self):
-        super().clean()
-        if self.pk and self.company_id:
-            if self.calls.exclude(contact__company_id=self.company_id).exists() or self.emails.exclude(
-                contact__company_id=self.company_id
-            ).exists():
-                raise ValidationError({"company": "Existing calls or emails belong to another company."})
-
 
 class Call(ValidatedModel):
     class Status(models.TextChoices):
@@ -95,8 +77,6 @@ class Call(ValidatedModel):
         super().clean()
         if self.rating is not None and self.status != self.Status.COMPLETED:
             raise ValidationError({"rating": "Only completed calls may have a rating."})
-        if self.agent_id and self.contact_id and self.agent.company_id != self.contact.company_id:
-            raise ValidationError({"contact": "The contact must belong to the agent's company."})
 
     def __str__(self):
         return f"{self.contact} — {self.get_status_display()}"
@@ -118,6 +98,16 @@ class Appointment(ValidatedModel):
         super().clean()
         if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
             raise ValidationError({"ends_at": "End time must be after start time."})
+        if self.pk:
+            previous = type(self).objects.select_related("call").filter(pk=self.pk).first()
+            if previous and (
+                previous.call.status == Call.Status.COMPLETED
+                or (self.call_id and self.call.status == Call.Status.COMPLETED)
+            ) and any(
+                getattr(previous, field) != getattr(self, field)
+                for field in ("call_id", "starts_at", "ends_at", "notes")
+            ):
+                raise ValidationError("Appointments for completed calls cannot be changed.")
 
     def save(self, *args, **kwargs):
         from django.db import transaction
@@ -152,11 +142,6 @@ class Email(ValidatedModel):
 
     class Meta:
         ordering = ["-received_at", "-id"]
-
-    def clean(self):
-        super().clean()
-        if self.agent_id and self.contact_id and self.agent.company_id != self.contact.company_id:
-            raise ValidationError({"contact": "The contact must belong to the agent's company."})
 
     def __str__(self):
         return self.subject
