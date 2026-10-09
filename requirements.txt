@@ -1,0 +1,5 @@
+Django==6.0.9
+django-allauth[socialaccount]==65.19.7
+whitenoise==6.12.0
+gunicorn==26.2.0
+Pillow==12.3.0
