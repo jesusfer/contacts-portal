@@ -66,6 +66,44 @@ npm run build
 npm audit
 ```
 
+## Demo data
+
+After running migrations, seed a fictional workspace with companies, contacts,
+calls covering every status, past/upcoming appointments, contact ratings, and
+inbox messages with different read/replied states:
+
+```
+python manage.py seed_demo
+python manage.py changepassword demo-agent
+```
+
+Sign in as `demo-agent` using the password you set. A newly created demo user
+has no usable password until you set one, and has no administrator privileges.
+No sample password is bundled with the application.
+
+For Docker Compose:
+
+```
+docker compose exec portal python manage.py seed_demo
+docker compose exec portal python manage.py changepassword demo-agent
+```
+
+To populate an existing, empty agent workspace instead:
+
+```
+python manage.py seed_demo --username your-username
+```
+
+The command preserves existing user credentials and agent/company associations.
+It skips the entire operation if the selected agent already has calls or inbox
+messages, so repeat runs do not duplicate activity, reset edits, or move
+appointments. Demo company/contact directory entries are reused, not overwritten;
+they are shared with other agents just like ordinary directory entries.
+Appointments are relative to the initial seed time. Seeding is explicit and
+never runs automatically on startup; use a development/demo database rather
+than a production database. Inbox messages are fictional tracking records,
+not actual received or sent emails.
+
 ## Authentication and OIDC
 
 Local authentication uses Django usernames/passwords; public password signup
