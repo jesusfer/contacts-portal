@@ -36,12 +36,27 @@ an authenticated, private endpoint.
 
 ## Automated image builds
 
-The **Build Docker image** GitHub Actions workflow builds the Dockerfile on
+The **Build and publish Docker image** GitHub Actions workflow builds the Dockerfile on
 pushes to `main` that change `crm/`, `frontend/`, or `Dockerfile`. It also
 watches the remaining image inputs (`config/`, Python requirements, `manage.py`,
 the entrypoint, `.dockerignore`) and its own workflow definition.
-Builds use GitHub Actions caching and commit-SHA image tags. This workflow
-validates the image build only; it does not publish an image to a registry.
+Builds use GitHub Actions caching and publish commit-SHA image tags.
+
+Configure these repository settings under **Settings → Secrets and variables
+→ Actions** before running the workflow:
+
+| Type | Name | Value |
+| --- | --- | --- |
+| Variable | `REGISTRY_HOST` | Registry hostname, optionally with a port, without a scheme or trailing slash (for example, `ghcr.io` or `registry.example.com:5000`) |
+| Secret | `REGISTRY_USERNAME` | Registry login username |
+| Secret | `REGISTRY_PASSWORD` | Registry password or access token with push permission |
+
+The published image is
+`<REGISTRY_HOST>/jesusfer/contacts-portal:<commit-sha>` (the namespace/image
+path follows the GitHub repository name). Ensure the credentials can push to
+that image path. For GHCR, use a token with package write access as the password;
+this workflow uses the configured secrets rather than `GITHUB_TOKEN`.
+Credentials are used only for registry login, not passed into the image build.
 
 ## Local development
 
