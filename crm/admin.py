@@ -32,10 +32,11 @@ class AppointmentInline(admin.StackedInline):
 
 @admin.register(Call)
 class CallAdmin(admin.ModelAdmin):
-    list_display = ["contact", "agent", "status", "rating"]
+    list_display = ["contact", "agent", "status", "rating", "was_rescheduled"]
     list_filter = ["status", "agent__company"]
     search_fields = ["contact__name", "agent__user__username", "summary"]
     autocomplete_fields = ["agent", "contact"]
+    readonly_fields = ["was_rescheduled"]
     inlines = [AppointmentInline]
 
 

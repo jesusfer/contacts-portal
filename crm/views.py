@@ -124,6 +124,7 @@ def call_json(call):
         "id": call.pk,
         "contact": contact_json(call.contact),
         "status": call.status,
+        "was_rescheduled": call.was_rescheduled,
         "summary": call.summary,
         "rating": call.rating,
         "appointment": appointment,
@@ -136,6 +137,7 @@ def appointment_json(appointment):
         "call": {
             "id": appointment.call_id,
             "status": appointment.call.status,
+            "was_rescheduled": appointment.call.was_rescheduled,
             "contact": contact_json(appointment.call.contact),
         },
     }
@@ -338,7 +340,7 @@ def kpis(request):
         **aggregates(),
         non_scheduled=Count("id", filter=~Q(status=Call.Status.SCHEDULED)),
         missed=Count("id", filter=Q(status=Call.Status.MISSED)),
-        rescheduled=Count("id", filter=Q(status=Call.Status.RESCHEDULED)),
+        rescheduled=Count("id", filter=Q(was_rescheduled=True) | Q(status=Call.Status.RESCHEDULED)),
     )
     denominator = totals.pop("non_scheduled")
     totals["missed_percentage"] = 100 * totals.pop("missed") / denominator if denominator else 0

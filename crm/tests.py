@@ -1,5 +1,6 @@
 import json
 import io
+import importlib
 import os
 import secrets
 import subprocess
@@ -13,9 +14,10 @@ from allauth.socialaccount.models import SocialAccount, SocialLogin
 from allauth.account.models import EmailAddress
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.apps import apps
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured, ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import resolve, reverse
 from django.utils import timezone
@@ -234,6 +236,7 @@ class APITests(TestCase):
         response = self.send("post", "/api/calls/", {"contact_id": self.contact.id, "summary": "Planned"})
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["status"], "scheduled")
+        self.assertFalse(response.json()["was_rescheduled"])
         self.assertIsNone(response.json()["appointment"])
         self.assertEqual(Call.objects.get(pk=response.json()["id"]).agent, self.agent)
         response = self.send(
@@ -305,17 +308,23 @@ class APITests(TestCase):
         response = self.send("patch", path, {"ends_at": (self.start + timedelta(hours=2)).isoformat()})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["call"]["status"], "rescheduled")
+        self.assertTrue(response.json()["call"]["was_rescheduled"])
         self.call.refresh_from_db()
         self.assertIsNone(self.call.rating)
+        self.assertTrue(self.call.was_rescheduled)
         self.call.status = "completed"
         self.call.rating = 5
         self.call.save()
         response = self.send("patch", path, {"ends_at": (self.start + timedelta(hours=3)).isoformat()})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.send("patch", path, {"notes": "Cannot change notes"}).status_code, 400)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["call"]["status"], "completed")
+        response = self.send("patch", path, {"notes": "Corrected historical notes"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["notes"], "Corrected historical notes")
+        self.assertEqual(response.json()["call"]["status"], "completed")
         self.assertEqual(self.send("patch", path, {}).status_code, 200)
         self.appointment.refresh_from_db()
-        self.assertEqual(self.appointment.ends_at, self.start + timedelta(hours=2))
+        self.assertEqual(self.appointment.ends_at, self.start + timedelta(hours=3))
         self.call.refresh_from_db()
         self.assertEqual(self.call.rating, 5)
         for status in ("missed", "cancelled"):
@@ -384,6 +393,34 @@ class APITests(TestCase):
         self.assertEqual(result["rescheduled_percentage"], 0)
         self.assertEqual(result["by_contact"], [])
 
+    def test_reschedule_history_survives_completion_and_is_api_read_only(self):
+        path = f"/api/calls/{self.call.id}/"
+        response = self.send("patch", path, {"status": "rescheduled"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["was_rescheduled"])
+        response = self.send("patch", path, {"status": "completed", "rating": 5})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["was_rescheduled"])
+        self.assertEqual(self.client.get("/api/kpis/").json()["rescheduled_percentage"], 100)
+        self.assertEqual(self.send("patch", path, {"was_rescheduled": False}).status_code, 400)
+        self.assertEqual(self.send(
+            "post", "/api/calls/", {"contact_id": self.contact.id, "was_rescheduled": True}
+        ).status_code, 400)
+        self.call.refresh_from_db()
+        self.call.was_rescheduled = False
+        self.call.summary = "History cannot be reset"
+        self.call.save(update_fields=["summary"])
+        self.call.refresh_from_db()
+        self.assertTrue(self.call.was_rescheduled)
+
+    def test_current_rescheduled_fallback_and_existing_history_backfill(self):
+        Call.objects.filter(pk=self.call.id).update(status="rescheduled", was_rescheduled=False)
+        self.assertEqual(self.client.get("/api/kpis/").json()["rescheduled_percentage"], 100)
+        migration = importlib.import_module("crm.migrations.0002_call_was_rescheduled")
+        migration.preserve_existing_reschedules(apps, connection.schema_editor())
+        self.call.refresh_from_db()
+        self.assertTrue(self.call.was_rescheduled)
+
     def test_spa_missing_build_and_reserved_routes(self):
         with override_settings(FRONTEND_DIST=Path("crm/nonexistent-frontend")):
             self.assertEqual(self.client.get("/dashboard").status_code, 503)
@@ -442,10 +479,16 @@ class ModelTests(TestCase):
         call.refresh_from_db()
         self.assertEqual(call.status, "rescheduled")
         call.status = "completed"
+        call.rating = 4
         call.save()
-        appointment.notes = "Immutable"
-        with self.assertRaises(ValidationError):
-            appointment.save()
+        appointment.notes = "Historical correction"
+        appointment.ends_at += timedelta(hours=1)
+        appointment.save()
+        appointment.refresh_from_db()
+        call.refresh_from_db()
+        self.assertEqual(appointment.notes, "Historical correction")
+        self.assertEqual(call.status, "completed")
+        self.assertEqual(call.rating, 4)
 
     def test_cross_company_models_and_independent_company_reassignment(self):
         other = Contact.objects.create(name="Other", email="other@example.com", company=self.other_company)

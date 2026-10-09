@@ -55,6 +55,7 @@ class Call(ValidatedModel):
     agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name="calls")
     contact = models.ForeignKey(Contact, on_delete=models.PROTECT, related_name="calls")
     status = models.CharField(max_length=20, choices=Status, default=Status.SCHEDULED)
+    was_rescheduled = models.BooleanField(default=False, editable=False)
     summary = models.TextField(blank=True)
     rating = models.PositiveSmallIntegerField(
         null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(5)]
@@ -78,6 +79,15 @@ class Call(ValidatedModel):
         if self.rating is not None and self.status != self.Status.COMPLETED:
             raise ValidationError({"rating": "Only completed calls may have a rating."})
 
+    def save(self, *args, **kwargs):
+        if self.status == self.Status.RESCHEDULED or (
+            self.pk and type(self).objects.filter(pk=self.pk, was_rescheduled=True).exists()
+        ):
+            self.was_rescheduled = True
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"was_rescheduled"}
+        return super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.contact} — {self.get_status_display()}"
 
@@ -98,16 +108,6 @@ class Appointment(ValidatedModel):
         super().clean()
         if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
             raise ValidationError({"ends_at": "End time must be after start time."})
-        if self.pk:
-            previous = type(self).objects.select_related("call").filter(pk=self.pk).first()
-            if previous and (
-                previous.call.status == Call.Status.COMPLETED
-                or (self.call_id and self.call.status == Call.Status.COMPLETED)
-            ) and any(
-                getattr(previous, field) != getattr(self, field)
-                for field in ("call_id", "starts_at", "ends_at", "notes")
-            ):
-                raise ValidationError("Appointments for completed calls cannot be changed.")
 
     def save(self, *args, **kwargs):
         from django.db import transaction
