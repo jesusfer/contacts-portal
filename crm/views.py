@@ -15,6 +15,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from .forms import AppointmentForm, CallForm, CompanyForm, ContactForm, EmailForm
 from .models import Agent, Appointment, Call, Company, Contact, Email
+from .signals import AUTH_SOURCE_SESSION_KEY
 
 
 def error(message, status=400, **extra):
@@ -159,10 +160,22 @@ def session_json(request):
     user = None
     agent = None
     if request.user.is_authenticated:
+        provider_id = request.session.get(AUTH_SOURCE_SESSION_KEY)
+        auth_source = "Local"
+        if provider_id:
+            auth_source = next(
+                (
+                    app["name"]
+                    for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
+                    if app["provider_id"] == provider_id
+                ),
+                "OIDC",
+            )
         user = {
             "id": request.user.pk,
             "username": request.user.get_username(),
             "name": request.user.get_full_name() or request.user.get_username(),
+            "auth_source": auth_source,
         }
         try:
             profile = Agent.objects.select_related("company").get(user=request.user)
@@ -174,7 +187,7 @@ def session_json(request):
             "id": app["provider_id"], "name": app["name"],
             "login_url": reverse("openid_connect_login", kwargs={"provider_id": app["provider_id"]}),
         }
-        for app in settings.SOCIALACCOUNT_PROVIDERS["openid_connect"]["APPS"]
+        for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
     ]
     return {"user": user, "agent": agent, "providers": providers}
 

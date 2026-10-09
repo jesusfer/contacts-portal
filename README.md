@@ -138,6 +138,15 @@ signed-in users can also manage connections at `/accounts/3rdparty/`.
 New OIDC users receive local accounts but cannot access CRM data until an
 administrator provisions their Agent/company association.
 
+The dashboard shows the current session's authentication source: **Local** for
+username/password sign-ins, or the provider's exact configured `name` (for
+example, Entra ID or Ping) for OIDC sign-ins. This reflects the service used
+to sign in, not all identities linked to the account. Connecting another
+identity does not change the displayed source; signing in again does.
+Sessions created before source tracking was introduced display Local until
+the next sign-in. If the active provider is removed from configuration, the
+dashboard displays OIDC rather than guessing a provider name.
+
 ## Deployment settings
 
 | Environment variable | Purpose |
