@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 
 const statuses = ['scheduled', 'completed', 'missed', 'rescheduled', 'cancelled']
-const labels = { dashboard: 'Overview', calls: 'Call log', calendar: 'Calendar', contacts: 'Contacts', inbox: 'Inbox', appointments: 'Appointment' }
+const labels = { dashboard: 'Overview', calls: 'Call log', calendar: 'Calendar', contacts: 'Contacts', inbox: 'Inbox', appointments: 'Appointment', profile: 'My profile', access: 'Workspace access' }
 const icons = {
   dashboard: <><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
   calls: <path d="M6 3H3v4c0 8 6 14 14 14h4v-4l-5-2-2 3c-4-1-7-4-8-8l3-2-3-5Z"/>,
   calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-14 4h3m4 0h3"/></>,
   contacts: <><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m1-16a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 5"/></>,
   inbox: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/></>,
+  profile: <><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></>,
+  access: <><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></>,
   arrow: <path d="m9 5 7 7-7 7"/>, plus: <path d="M12 5v14M5 12h14"/>,
   star: <path d="m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z"/>,
   check: <path d="m5 12 4 4L19 6"/>, clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
@@ -26,10 +28,11 @@ function localInput(value) {
 }
 function csrf() { return decodeURIComponent(document.cookie.split('; ').find(c => c.startsWith('csrftoken='))?.slice(10) || '') }
 async function api(path, options = {}) {
+  const multipart = options.body instanceof FormData
   const response = await fetch(`/api/${path}`, {
     credentials: 'same-origin', ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.method ? { 'X-CSRFToken': csrf() } : {}), ...options.headers },
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    headers: { ...(!multipart ? { 'Content-Type': 'application/json' } : {}), ...(options.method ? { 'X-CSRFToken': csrf() } : {}), ...options.headers },
+    body: multipart ? options.body : options.body ? JSON.stringify(options.body) : undefined,
   })
   let data
   try { data = await response.json() } catch { throw new Error(`The server returned an unexpected response (${response.status}). Please try again.`) }
@@ -61,6 +64,76 @@ function ErrorNotice({ error, retry }) { return error && <div class="error" role
 function Empty({ title = 'Nothing here yet', children, icon = 'contacts' }) { return <div class="empty"><Icon name={icon} size={27}/><strong>{title}</strong><p>{children}</p></div> }
 function Badge({ status }) { return <span class={`badge ${status}`}>{status}</span> }
 function Contact({ contact }) { return <div class="contact-cell"><span class="avatar">{initials(contact?.name)}</span><span><strong>{contact?.name || 'Unknown contact'}</strong><small>{contact?.company?.name || contact?.email}</small></span></div> }
+function UserAvatar({ user, revision, large = false }) {
+  const [failedSource, setFailedSource] = useState('')
+  const source = user.picture_url === '/api/profile/picture/' ? `${user.picture_url}?v=${revision}` : ''
+  return <span class={`avatar user-avatar${large ? ' profile-avatar' : ''}`}>{source && source !== failedSource ? <img src={source} alt={`${user.name || user.username}'s profile picture`} onError={() => setFailedSource(source)}/> : <span aria-label="Profile initials">{initials(user.name || user.username)}</span>}</span>
+}
+function Profile({ user, revision, onUpdate }) {
+  const resource = useResource('profile/')
+  const [firstName, setFirstName] = useState(''), [lastName, setLastName] = useState('')
+  const [busy, setBusy] = useState(''), [error, setError] = useState(''), [success, setSuccess] = useState('')
+  const [file, setFile] = useState(null), [pictureUrl, setPictureUrl] = useState(null)
+  const fileInput = useRef()
+  useEffect(() => {
+    if (resource.data) { setFirstName(resource.data.first_name); setLastName(resource.data.last_name); setPictureUrl(resource.data.picture_url) }
+  }, [resource.data])
+  async function update(action, path, options, message) {
+    setBusy(action); setError(''); setSuccess('')
+    try {
+      const result = await api(path, options)
+      if (action !== 'name') {
+        setPictureUrl(action === 'remove' ? null : result.picture_url || '/api/profile/picture/')
+        setFile(null)
+        if (fileInput.current) fileInput.current.value = ''
+      }
+      await onUpdate()
+      setSuccess(message)
+    } catch (err) { setError(err.message) } finally { setBusy('') }
+  }
+  function chooseFile(e) {
+    const selected = e.target.files?.[0]
+    setFile(null); setError(''); setSuccess('')
+    if (!selected) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(selected.type)) { setError('Choose a JPEG, PNG, or WEBP image.'); e.target.value = ''; return }
+    if (selected.size > 5 * 1024 * 1024) { setError('Your picture must be no larger than 5 MiB.'); e.target.value = ''; return }
+    setFile(selected)
+  }
+  function upload(e) {
+    e.preventDefault()
+    if (!file || busy) return
+    const body = new FormData()
+    body.append('picture', file)
+    update('upload', 'profile/picture/', { method: 'POST', body }, 'Profile picture updated.')
+  }
+  if (resource.loading) return <Loading/>
+  if (resource.error) return <ErrorNotice error={resource.error} retry={resource.retry}/>
+  return <>
+    <PageHeading eyebrow="Your account" title="My profile" subtitle="Update your name and profile picture."/>
+    <ErrorNotice error={error}/>
+    {success && <div class="success" role="status">{success}</div>}
+    <div class="detail-grid">
+      <Panel title="Personal details"><div class="panel-body">
+        <form class="form" aria-label="Personal details" aria-busy={!!busy} onSubmit={e => { e.preventDefault(); if (!busy) update('name', 'profile/', { method: 'PATCH', body: { first_name: firstName, last_name: lastName } }, 'Profile details updated.') }}>
+          <div class="form-grid"><label>First name<input name="first_name" autoComplete="given-name" maxLength={150} value={firstName} disabled={!!busy} onInput={e => setFirstName(e.target.value)}/></label><label>Last name<input name="last_name" autoComplete="family-name" maxLength={150} value={lastName} disabled={!!busy} onInput={e => setLastName(e.target.value)}/></label></div>
+          <label>Username<input value={resource.data.username} readOnly autoComplete="username"/></label>
+          <label>Email address<input value={resource.data.email || ''} readOnly autoComplete="email"/></label>
+          <p class="form-help">Username and email are managed by your identity provider or administrator.</p>
+          <p class="muted">Signed in with {user.auth_source || 'Local'}.</p>
+          <div class="actions"><button class="button" disabled={!!busy}>{busy === 'name' ? 'Saving…' : 'Save details'}</button></div>
+        </form>
+      </div></Panel>
+      <Panel title="Profile picture"><div class="panel-body">
+        <div class="profile-picture"><UserAvatar user={{ ...user, picture_url: pictureUrl }} revision={revision} large/></div>
+        <form class="form" aria-label="Profile picture" aria-busy={!!busy} onSubmit={upload}>
+          <label>Choose a picture<input ref={fileInput} name="picture" type="file" accept="image/jpeg,image/png,image/webp" aria-describedby="picture-help" disabled={!!busy} onChange={chooseFile}/></label>
+          <p class="form-help" id="picture-help">JPEG, PNG, or WEBP; up to 5 MiB and 4096 × 4096 pixels. Pictures are resized for your profile.</p>
+          <div class="actions"><button class="button" disabled={!!busy || !file}>{busy === 'upload' ? 'Uploading…' : 'Upload picture'}</button><button class="button secondary" type="button" disabled={!!busy || !pictureUrl} onClick={() => update('remove', 'profile/picture/', { method: 'DELETE' }, 'Profile picture removed.')}>{busy === 'remove' ? 'Removing…' : 'Remove picture'}</button></div>
+        </form>
+      </div></Panel>
+    </div>
+  </>
+}
 function Panel({ title, count, action, children }) { return <section class="panel"><div class="panel-heading"><div class="panel-title"><h2>{title}</h2>{count != null && <span class="counter">{count}</span>}</div>{action}</div>{children}</section> }
 function PageHeading({ eyebrow = 'Your workspace', title, subtitle, children }) { return <div class="page-heading"><div><div class="eyebrow">{eyebrow}</div><h1>{title}</h1><p class="muted">{subtitle}</p></div>{children}</div> }
 function Dialog({ title, close, children }) {
@@ -223,7 +296,9 @@ function CreateForm({ type, initialId, done, close }) {
 }
 export function App() {
   const [session,setSession] = useState(null), [loading,setLoading] = useState(true), [error,setError] = useState(''), [route,setRoute] = useState(location.hash.slice(1) || '/dashboard'), [version,setVersion] = useState(0), [modal,setModal] = useState(null), [mobile,setMobile] = useState(false), [signingOut,setSigningOut] = useState(false)
+  const [profileRevision, setProfileRevision] = useState(0)
   async function loadSession() { setError(''); const value = await api('session/');setSession(value);return value }
+  async function refreshProfile() { setProfileRevision(n => n + 1); await loadSession() }
   useEffect(() => {
     loadSession().catch(e => setError(e.message)).finally(() => setLoading(false))
     const hash = () => {setRoute(location.hash.slice(1) || '/dashboard');setMobile(false);setModal(null);window.scrollTo(0,0)}
@@ -239,11 +314,12 @@ export function App() {
   if (loading) return <Loading/>
   if (!session) return <div class="provision"><div class="brand" style="color:#294733;justify-content:center;margin-bottom:25px"><span class="brand-mark">g</span>gather.</div><ErrorNotice error={error} retry={() => {setLoading(true);loadSession().catch(e=>setError(e.message)).finally(()=>setLoading(false))}}/></div>
   if (!session.user) return <Login session={session} onLogin={loadSession}/>
-  if (!session.agent) return <div class="provision"><div class="eyebrow">You're signed in</div><h1>Your workspace is on its way.</h1><p class="muted">Your account is not linked to an agent workspace yet. Ask your administrator to provision your access, then refresh this page.</p><ErrorNotice error={error}/><div class="actions" style="margin-top:25px;justify-content:center"><button class="button" onClick={() => loadSession().catch(e => setError(e.message))}>Check access</button><button class="button secondary" disabled={signingOut} onClick={logout}>{signingOut ? 'Signing out…' : 'Sign out'}</button></div></div>
-  const parts = route.split('/').filter(Boolean), section = parts[0] || 'dashboard', id = /^\d+$/.test(parts[1] || '') ? parts[1] : null
+  const parts = route.split('/').filter(Boolean), section = !session.agent && parts[0] !== 'profile' ? 'access' : parts[0] || 'dashboard', id = /^\d+$/.test(parts[1] || '') ? parts[1] : null
   const props = {version,refresh,openCreate}
   let page
-  if (section === 'dashboard') page = <Dashboard user={session.user} {...props}/>
+  if (section === 'profile') page = <Profile key={session.user.id} user={session.user} revision={profileRevision} onUpdate={refreshProfile}/>
+  else if (!session.agent) page = <div class="provision"><div class="eyebrow">You're signed in</div><h1>Your workspace is on its way.</h1><p class="muted">Your account is not linked to an agent workspace yet. Ask your administrator to provision your access, then check again.</p><div class="actions" style="margin-top:25px;justify-content:center"><button class="button" onClick={() => loadSession().catch(e => setError(e.message))}>Check access</button><a class="button secondary" href="#/profile">My profile</a></div></div>
+  else if (section === 'dashboard') page = <Dashboard user={session.user} {...props}/>
   else if (section === 'calls') page = id ? <CallDetail key={id} id={id} {...props}/> : <Calls {...props}/>
   else if (section === 'appointments' && id) page = <AppointmentDetail key={id} id={id} {...props}/>
   else if (section === 'calendar') page = <Calendar {...props}/>
@@ -256,14 +332,14 @@ export function App() {
       {mobile && <button class="nav-backdrop" aria-label="Close navigation" onClick={() => setMobile(false)}/>}
       <aside class={`sidebar ${mobile ? 'open' : ''}`}>
         <div style="display:flex;align-items:center;justify-content:space-between">
-          <a class="brand" href="#/dashboard"><span class="brand-mark">g</span>gather<span style="color:#b8d99d">.</span></a>
+          <a class="brand" href={session.agent ? '#/dashboard' : '#/access'}><span class="brand-mark">g</span>gather<span style="color:#b8d99d">.</span></a>
           <button class="menu-toggle" style="color:#d5edb7;margin:0" aria-label="Close navigation" onClick={() => setMobile(false)}><Icon name="close"/></button>
         </div>
         <div class="workspace">Your workspace</div>
-        <nav class="nav" aria-label="Main navigation">{['dashboard','calls','calendar','contacts','inbox'].map(item => <a href={`#/${item}`} key={item} class={section === item || (item === 'calendar' && section === 'appointments') ? 'active' : ''} aria-current={section === item || (item === 'calendar' && section === 'appointments') ? 'page' : undefined} onClick={() => setMobile(false)}><Icon name={item}/>{labels[item]}</a>)}</nav>
+        <nav class="nav" aria-label="Main navigation">{(session.agent ? ['dashboard','calls','calendar','contacts','inbox','profile'] : ['access','profile']).map(item => <a href={`#/${item}`} key={item} class={section === item || (item === 'calendar' && section === 'appointments') ? 'active' : ''} aria-current={section === item || (item === 'calendar' && section === 'appointments') ? 'page' : undefined} onClick={() => setMobile(false)}><Icon name={item}/>{labels[item]}</a>)}</nav>
         <div class="sidebar-bottom">
           <a href="/accounts/3rdparty/">Manage identity connections ↗</a>
-          <div class="user"><span class="avatar">{initials(session.user.name || session.user.username)}</span><div><strong>{session.user.name || session.user.username}</strong><small>{session.agent.company.name}</small></div></div>
+          <div class="user"><UserAvatar key={session.user.id} user={session.user} revision={profileRevision}/><div><strong>{session.user.name || session.user.username}</strong><small>{session.agent?.company?.name || 'Workspace access pending'}</small></div></div>
           <button class="signout" disabled={signingOut} onClick={logout}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
         </div>
       </aside>
@@ -278,6 +354,6 @@ export function App() {
         <div class="content" id="main-content" tabIndex={-1}><ErrorNotice error={error}/>{page}</div>
       </main>
     </div>
-    {modal && <Dialog title={modal.type === 'call' ? 'Log a conversation' : modal.type === 'contact' ? 'Add a new contact' : modal.type === 'company' ? 'Add a company' : 'Schedule a conversation'} close={() => setModal(null)}><CreateForm {...modal} done={done} close={() => setModal(null)}/></Dialog>}
+    {modal && session.agent && <Dialog title={modal.type === 'call' ? 'Log a conversation' : modal.type === 'contact' ? 'Add a new contact' : modal.type === 'company' ? 'Add a company' : 'Schedule a conversation'} close={() => setModal(null)}><CreateForm {...modal} done={done} close={() => setModal(null)}/></Dialog>}
   </>
 }

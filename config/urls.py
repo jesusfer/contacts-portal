@@ -7,6 +7,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("api/session/", views.session),
+    path("api/profile/", views.profile),
+    path("api/profile/picture/", views.profile_picture),
     path("api/login/", views.password_login),
     path("api/logout/", views.session_logout),
     path("api/companies/", views.companies),

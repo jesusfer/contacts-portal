@@ -107,7 +107,7 @@ class LoginSourceTests(TestCase):
                 self.assertEqual(response["user"]["auth_source"], expected)
                 self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], provider_id)
                 self.assertEqual(
-                    set(response["user"]), {"id", "username", "name", "auth_source"}
+                    set(response["user"]), {"id", "username", "name", "auth_source", "picture_url"}
                 )
                 self.assertNotIn("fixture", str(response))
                 self.assertNotIn("linked-subject", str(response))

@@ -31,7 +31,8 @@ container with SQLite; heavier write workloads require a database migration.
 
 The image runs as UID/GID 10001. If using bind mounts instead of named volumes,
 ensure both mounted directories are writable by that user. Media is persistent
-but is not exposed publicly by WhiteNoise; this application has no upload UI.
+but is not exposed publicly by WhiteNoise. Profile pictures are served through
+an authenticated, private endpoint.
 
 ## Local development
 
@@ -146,6 +147,24 @@ identity does not change the displayed source; signing in again does.
 Sessions created before source tracking was introduced display Local until
 the next sign-in. If the active provider is removed from configuration, the
 dashboard displays OIDC rather than guessing a provider name.
+
+## User profiles
+
+Signed-in users can open **Profile** to update their first and last names and
+upload, replace, or remove their profile picture. Profile access is available
+even before an administrator provisions an Agent. Names and pictures update
+in the signed-in interface after saving.
+
+Username and email are displayed read-only because they identify the account;
+profile changes do not modify credentials, identity connections, company
+membership, or permissions.
+
+Pictures must be JPEG, PNG, or WebP, at most 5 MiB and 4096 pixels on either
+side. The backend validates image content, corrects orientation, reduces it to
+at most 512 × 512 pixels, and stores a JPEG without source metadata. Uploaded
+filenames are not used as storage paths. Only the current user can retrieve
+their picture; the media directory is not publicly browsable. Pictures persist
+in the existing `django_media` volume.
 
 ## Deployment settings
 

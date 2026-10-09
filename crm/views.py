@@ -3,18 +3,20 @@ from functools import wraps
 
 from allauth.core import ratelimit
 from django.conf import settings
-from django.contrib.auth import authenticate, login, logout
-from django.core.exceptions import ObjectDoesNotExist, RequestDataTooBig, ValidationError
+from django.contrib.auth import authenticate, get_user_model, login, logout
+from django.core.exceptions import ObjectDoesNotExist, RequestDataTooBig, SuspiciousOperation, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, Q
 from django.http import FileResponse, Http404, JsonResponse
+from django.http.multipartparser import MultiPartParserError
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from .forms import AppointmentForm, CallForm, CompanyForm, ContactForm, EmailForm
-from .models import Agent, Appointment, Call, Company, Contact, Email
+from .models import Agent, Appointment, Call, Company, Contact, Email, UserProfile
+from .pictures import normalize_picture
 from .signals import AUTH_SOURCE_SESSION_KEY
 
 
@@ -49,6 +51,8 @@ def api(methods, *, agent_required=True):
                 return error("Validation failed.", fields=getattr(exc, "message_dict", {"__all__": exc.messages}))
             except IntegrityError:
                 return error("The data conflicts with an existing record or constraint.", 400)
+            except (SuspiciousOperation, MultiPartParserError):
+                return error("Malformed or oversized request.", 400)
         return wrapped
     return decorate
 
@@ -176,6 +180,7 @@ def session_json(request):
             "username": request.user.get_username(),
             "name": request.user.get_full_name() or request.user.get_username(),
             "auth_source": auth_source,
+            "picture_url": picture_url(request.user),
         }
         try:
             profile = Agent.objects.select_related("company").get(user=request.user)
@@ -190,6 +195,85 @@ def session_json(request):
         for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
     ]
     return {"user": user, "agent": agent, "providers": providers}
+
+
+def picture_url(user):
+    return "/api/profile/picture/" if UserProfile.objects.filter(user=user).exclude(picture="").exists() else None
+
+
+def profile_json(user):
+    return {
+        "id": user.pk,
+        "username": user.get_username(),
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "picture_url": picture_url(user),
+    }
+
+
+@api(["GET", "PATCH"], agent_required=False)
+def profile(request):
+    if not request.user.is_authenticated:
+        return error("Authentication required.", 401)
+    if request.method == "PATCH":
+        data = payload(request, {"first_name": TEXT, "last_name": TEXT})
+        for field, value in data.items():
+            if len(value) > 150:
+                raise ValidationError({field: "Use at most 150 characters."})
+        for field, value in data.items():
+            setattr(request.user, field, value)
+        if data:
+            request.user.save(update_fields=list(data))
+    return JsonResponse(profile_json(request.user))
+
+
+@api(["GET", "POST", "DELETE"], agent_required=False)
+def profile_picture(request):
+    if not request.user.is_authenticated:
+        return error("Authentication required.", 401)
+    if request.method == "GET":
+        item = get_object_or_404(UserProfile.objects.exclude(picture=""), user=request.user)
+        try:
+            stream = item.picture.open("rb")
+        except FileNotFoundError:
+            raise Http404
+        response = FileResponse(stream, content_type="image/jpeg")
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Disposition"] = 'inline; filename="profile.jpg"'
+        return response
+    normalized = None
+    if request.method == "POST":
+        if request.content_type != "multipart/form-data":
+            raise ValidationError("Content-Type must be multipart/form-data.")
+        if request.POST or set(request.FILES) != {"picture"} or len(request.FILES.getlist("picture")) != 1:
+            raise ValidationError("Upload exactly one picture field and no other fields.")
+        normalized = normalize_picture(request.FILES["picture"])
+    storage = UserProfile._meta.get_field("picture").storage
+    new_name = None
+    try:
+        with transaction.atomic():
+            # Lock the owner even before a profile exists to serialize first uploads.
+            user = get_user_model().objects.select_for_update().get(pk=request.user.pk)
+            item = UserProfile.objects.filter(user=user).first()
+            if item is None and normalized is not None:
+                item = UserProfile.objects.create(user=user)
+            if item is not None:
+                old_name = item.picture.name
+                if normalized is not None:
+                    item.picture.save("picture.jpg", normalized, save=False)
+                    new_name = item.picture.name
+                else:
+                    item.picture = ""
+                item.save(update_fields=["picture"])
+                if old_name:
+                    transaction.on_commit(lambda: storage.delete(old_name), robust=True)
+    except Exception:
+        if new_name:
+            storage.delete(new_name)
+        raise
+    return JsonResponse(profile_json(request.user))
 
 
 @ensure_csrf_cookie
