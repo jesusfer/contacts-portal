@@ -39,7 +39,8 @@ an authenticated, private endpoint.
 The **Build and publish Docker image** GitHub Actions workflow builds the Dockerfile on
 pushes to `main` that change `crm/`, `frontend/`, or `Dockerfile`. It also
 watches the remaining image inputs (`config/`, Python requirements, `manage.py`,
-the entrypoint, `.dockerignore`) and its own workflow definition.
+the entrypoint, `.dockerignore`, and authentication `templates/`) and its own
+workflow definition.
 Builds use GitHub Actions caching and publish commit-SHA image tags.
 
 Configure these repository settings under **Settings → Secrets and variables
@@ -162,6 +163,10 @@ provider subjects to existing users using allauth's Social Accounts admin;
 signed-in users can also manage connections at `/accounts/3rdparty/`.
 New OIDC users receive local accounts but cannot access CRM data until an
 administrator provisions their Agent/company association.
+
+OIDC login, error, cancellation, signup, connection management, and callback
+redirect pages share the portal's styled authentication layout. These templates
+are included in the Docker image; rebuild and redeploy the image to apply changes.
 
 The dashboard shows the current session's authentication source: **Local** for
 username/password sign-ins, or the provider's exact configured `name` (for
