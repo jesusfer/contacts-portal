@@ -41,4 +41,5 @@ class TenantAwareOpenIDConnectOAuth2Adapter(OpenIDConnectOAuth2Adapter):
 
 
 class TenantAwareOpenIDConnectProvider(OpenIDConnectProvider):
+    package = "allauth.socialaccount.providers.openid_connect"
     oauth2_adapter_class = TenantAwareOpenIDConnectOAuth2Adapter
