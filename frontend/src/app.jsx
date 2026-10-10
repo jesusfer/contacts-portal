@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
+import * as TeamsSDK from './teams.js'
 
 const statuses = ['scheduled', 'completed', 'missed', 'rescheduled', 'cancelled']
 const labels = { dashboard: 'Overview', calls: 'Call log', calendar: 'Calendar', contacts: 'Contacts', inbox: 'Inbox', appointments: 'Appointment', profile: 'My profile', access: 'Workspace access' }
@@ -66,11 +67,208 @@ function Badge({ status }) { return <span class={`badge ${status}`}>{status}</sp
 function Contact({ contact }) { return <div class="contact-cell"><span class="avatar">{initials(contact?.name)}</span><span><strong>{contact?.name || 'Unknown contact'}</strong><small>{contact?.company?.name || contact?.email}</small></span></div> }
 function UserAvatar({ user, revision, large = false }) {
   const [failedSource, setFailedSource] = useState('')
-  const source = user.picture_url === '/api/profile/picture/' ? `${user.picture_url}?v=${revision}` : ''
+  const isLocalProfile = user.picture_url === '/api/profile/picture/'
+  const isGraphProfile = user.picture_url === '/api/graph/picture/'
+  const source = isLocalProfile ? `${user.picture_url}?v=${revision}` : (isGraphProfile ? user.picture_url : '')
   return <span class={`avatar user-avatar${large ? ' profile-avatar' : ''}`}>{source && source !== failedSource ? <img src={source} alt={`${user.name || user.username}'s profile picture`} onError={() => setFailedSource(source)}/> : <span aria-label="Profile initials">{initials(user.name || user.username)}</span>}</span>
 }
+
+function GraphPresenceIndicator({ user }) {
+  const [presence, setPresence] = useState({ availability: 'Unknown', activity: '' })
+  useEffect(() => {
+    setPresence({ availability: 'Unknown', activity: '' })
+    if (!user?.graph_enabled) return
+    let active = true, pollId, pending = false
+    const controller = new AbortController()
+    async function poll() {
+      if (!active || pending || document.hidden) return
+      clearTimeout(pollId)
+      pending = true
+      try {
+        const data = await api('graph/presence/', { signal: controller.signal })
+        if (active) setPresence({ availability: data.availability || 'Unknown', activity: data.activity || '' })
+      } catch { if (active) setPresence({ availability: 'Unknown', activity: '' }) }
+      finally {
+        pending = false
+        if (active) pollId = setTimeout(poll, 30000)
+      }
+    }
+    const onVisibility = () => !document.hidden && poll()
+    document.addEventListener('visibilitychange', onVisibility)
+    poll()
+    return () => { active = false; controller.abort(); clearTimeout(pollId); document.removeEventListener('visibilitychange', onVisibility) }
+  }, [user?.id, user?.graph_enabled])
+  const status = presence.availability.toLowerCase().replace(/[^a-z]/g, '')
+  const label = `Presence: ${presence.availability}${presence.activity ? ` · ${presence.activity}` : ''}`
+  return user?.graph_enabled ? <span class={`presence-indicator status-${status}`} role="img" title={label} aria-label={label}>●</span> : null
+}
+
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : null
+  } catch { return null }
+}
+
+function GraphLink({ url, children }) {
+  const href = safeExternalUrl(url)
+  return href ? <a class="link" href={href} target="_blank" rel="noopener noreferrer">{children} ↗</a> : null
+}
+
+function useGraphPages(path, field, version) {
+  const [state, setState] = useState({ path, items: [], next: null, loading: true, error: '' })
+  const request = useRef(null)
+  const generation = useRef(0)
+  const seen = useRef(new Set())
+  async function load(page, append = false) {
+    if (request.current) return
+    const current = generation.current
+    const controller = new AbortController()
+    request.current = controller
+    setState(s => ({ ...s, loading: true, error: '' }))
+    try {
+      const separator = path.includes('?') ? '&' : '?'
+      const data = await api(page ? `${path}${separator}page=${encodeURIComponent(page)}` : path, { signal: controller.signal })
+      if (current !== generation.current) return
+      if (page) seen.current.add(page)
+      const next = typeof data.next_page === 'string' && data.next_page && !seen.current.has(data.next_page) ? data.next_page : null
+      setState(s => {
+        const items = append ? [...s.items, ...(data[field] || [])] : data[field] || []
+        return { path, items: [...new Map(items.map(item => [item.id, item])).values()], next, loading: false, error: '' }
+      })
+    } catch (error) {
+      if (current === generation.current) setState(s => ({ ...s, loading: false, error: error.message }))
+    } finally {
+      if (request.current === controller) request.current = null
+    }
+  }
+  useEffect(() => {
+    generation.current++
+    request.current?.abort()
+    request.current = null
+    seen.current = new Set()
+    setState({ path, items: [], next: null, loading: true, error: '' })
+    load()
+    return () => { generation.current++; request.current?.abort(); request.current = null }
+  }, [path, version])
+  const visible = state.path === path ? state : { items: [], next: null, loading: true, error: '' }
+  return { ...visible, more: () => load(visible.next, true), retry: () => load(visible.next, visible.items.length > 0) }
+}
+
+function GraphPagination({ resource }) {
+  return <>{resource.loading && <Loading/>}<ErrorNotice error={resource.error} retry={resource.retry}/>{resource.next && !resource.error && <div class="panel-body"><button class="button secondary" disabled={resource.loading} onClick={resource.more}>Load more</button></div>}</>
+}
+
+function GraphCalendar({ version, compact = false }) {
+  const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+  const start = month.toISOString(), end = new Date(month.getFullYear(), month.getMonth() + 1, 1).toISOString()
+  const resource = useGraphPages(`graph/calendar/?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, 'events', version)
+  const navigate = offset => setMonth(value => new Date(value.getFullYear(), value.getMonth() + offset, 1))
+  return <>{!compact && <PageHeading title="Calendar" subtitle="Your Microsoft calendar. Events are read-only."/>}<Panel title={compact ? 'Coming up next · Microsoft calendar' : 'Microsoft calendar'} count={resource.items.length} action={compact && <a class="button quiet" href="#/calendar">View calendar</a>}>
+    <div class="graph-month"><button class="button secondary" aria-label="Previous month" onClick={() => navigate(-1)}>←</button><strong aria-live="polite">{month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</strong><button class="button secondary" aria-label="Next month" onClick={() => navigate(1)}>→</button></div>
+    {resource.items.slice().sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)).filter(event => !compact || new Date(event.ends_at) >= new Date()).map(event => <div class="list-row" key={event.id}><div class="row-main"><strong>{event.subject || '(No title)'}</strong><small>{dateTime(event.starts_at)} – {dateTime(event.ends_at)}{event.location ? ` · ${event.location}` : ''}</small><GraphLink url={event.web_url}>Open event</GraphLink></div></div>)}
+    {!resource.loading && !resource.error && !resource.items.length && <Empty title="No Microsoft events" icon="calendar">There are no events for this month.</Empty>}
+    <GraphPagination resource={resource}/>
+  </Panel></>
+}
+
+function GraphInbox({ version, compact = false }) {
+  const resource = useGraphPages('graph/inbox/', 'emails', version)
+  return <>{!compact && <PageHeading title="Inbox" subtitle="Your Microsoft messages. Read-only; open Outlook to reply."/>}<Panel title="Microsoft inbox" count={resource.items.length} action={compact && <a class="button quiet" href="#/inbox">View inbox</a>}>
+    {resource.items.map(email => <div class="list-row" key={email.id}><span class="avatar">{initials(email.contact?.name)}</span><div class="row-main"><strong>{email.contact?.name || email.contact?.email || 'Unknown sender'}{!email.is_read && <span class="notification-dot"/>}</strong><p>{email.subject || '(No subject)'}</p><small>{dateTime(email.received_at)}</small>{!compact && <p class="graph-message-body">{email.body}</p>}<GraphLink url={email.web_url}>Open message</GraphLink></div><Badge status={email.is_read ? 'read' : 'unread'}/></div>)}
+    {!resource.loading && !resource.error && !resource.items.length && <Empty title="No Microsoft messages" icon="inbox">Your inbox is empty.</Empty>}
+    <GraphPagination resource={resource}/>
+  </Panel></>
+}
+
+function initialProvider(providers) {
+  const query = new URLSearchParams(location.search)
+  if (query.has('provider')) {
+    const match = providers.find(provider => String(provider.id) === query.get('provider'))
+    if (!match) throw new Error('The selected organization is not configured for Teams. Ask your administrator to update this tab.')
+    return String(match.id)
+  }
+  return providers.length === 1 ? String(providers[0].id) : ''
+}
+
+function ProviderSelect({ providers, selected, onChange }) {
+  return <label class="teams-provider">Organization<select value={selected} onChange={event => onChange(event.target.value)}><option value="">Select an organization</option>{providers.map(provider => <option key={provider.id} value={String(provider.id)}>{provider.name}</option>)}</select></label>
+}
+
+function TeamsTab() {
+  const [providers, setProviders] = useState([]), [selected, setSelected] = useState('')
+  const [session, setSession] = useState(null), [error, setError] = useState(''), [loading, setLoading] = useState(true), [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let active = true
+    setSession(null); setError(''); setLoading(true)
+    async function signIn() {
+      try {
+        const config = await TeamsSDK.getTeamsConfig()
+        if (!active) return
+        const choices = config.providers || []
+        setProviders(choices)
+        const providerId = initialProvider(choices)
+        setSelected(providerId)
+        if (!choices.length) throw new Error('No Teams organizations are configured. Contact your administrator.')
+        await TeamsSDK.initializeTeams()
+        if (!active || !providerId) return
+        const token = await TeamsSDK.getTeamsAuthToken()
+        if (!active) return
+        if (!token) throw new Error('Teams could not provide a sign-in token. Please try again.')
+        const value = await TeamsSDK.exchangeTeamsToken(providerId, token)
+        if (!active) return
+        if (!value.user) throw new Error('Teams sign-in did not create a session. Please try again.')
+        history.replaceState(null, '', `${location.pathname}?provider=${encodeURIComponent(providerId)}#/dashboard`)
+        setSession(value)
+      } catch (error) {
+        if (active) setError(`Unable to sign in with Teams. ${error.message}`)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    signIn()
+    return () => { active = false }
+  }, [attempt])
+  if (session) return <WorkspaceApp initialSession={session} embedded onSessionEnd={() => { setSession(null); setError('Your Teams session has ended. Sign in again to continue.') }}/>
+  return <div class="teams-page"><div class="teams-container"><h2>Gather for Teams</h2>{loading ? <><Loading/><p class="muted">Signing you in with Teams…</p></> : <><ErrorNotice error={error} retry={() => setAttempt(n => n + 1)}/>{!error && <><ProviderSelect providers={providers} selected={selected} onChange={setSelected}/><button class="button" disabled={!selected} onClick={() => { history.replaceState(null, '', `${location.pathname}?provider=${encodeURIComponent(selected)}${location.hash}`); setAttempt(n => n + 1) }}>Continue with Teams</button></>}<div class="actions"><a class="button secondary" href="/#/login" target="_blank" rel="noopener noreferrer">Open browser sign-in</a></div></>}</div></div>
+}
+
+function TeamsConfig() {
+  const [providers, setProviders] = useState([]), [selected, setSelected] = useState('')
+  const [loading, setLoading] = useState(true), [error, setError] = useState(''), [attempt, setAttempt] = useState(0)
+  const providerRef = useRef(null), validity = useRef(null)
+  providerRef.current = providers.find(provider => String(provider.id) === selected) || null
+  useEffect(() => {
+    let active = true
+    setLoading(true); setError('')
+    async function configure() {
+      try {
+        const config = await TeamsSDK.getTeamsConfig()
+        await TeamsSDK.initializeTeams()
+        if (!active) return
+        const setValidity = await TeamsSDK.registerTeamsConfigHandler(() => providerRef.current)
+        if (!active) { setValidity(false); return }
+        validity.current = setValidity
+        const choices = config.providers || []
+        setProviders(choices)
+        setSelected(initialProvider(choices))
+        if (!choices.length) throw new Error('No Teams organizations are configured. Contact your administrator.')
+      } catch (error) {
+        if (active) setError(error.message || 'Unable to configure this tab.')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    configure()
+    return () => { active = false; validity.current?.(false); validity.current = null; providerRef.current = null }
+  }, [attempt])
+  useEffect(() => { validity.current?.(!loading && !error && !!providerRef.current) }, [loading, error, selected, providers])
+  return <div class="teams-page"><div class="teams-container"><h2>Gather for Teams</h2><p class="muted">Choose your organization, then click Save to add Gather.</p>{loading ? <Loading/> : <><ErrorNotice error={error} retry={() => setAttempt(n => n + 1)}/>{!error && <ProviderSelect providers={providers} selected={selected} onChange={setSelected}/>}</>}</div></div>
+}
+
 function Profile({ user, revision, onUpdate }) {
   const resource = useResource('profile/')
+  const isGraphProfile = !!(user.graph_enabled || resource.data?.graph_enabled || resource.data?.read_only)
   const [firstName, setFirstName] = useState(''), [lastName, setLastName] = useState('')
   const [busy, setBusy] = useState(''), [error, setError] = useState(''), [success, setSuccess] = useState('')
   const [file, setFile] = useState(null), [pictureUrl, setPictureUrl] = useState(null)
@@ -79,6 +277,7 @@ function Profile({ user, revision, onUpdate }) {
     if (resource.data) { setFirstName(resource.data.first_name); setLastName(resource.data.last_name); setPictureUrl(resource.data.picture_url) }
   }, [resource.data])
   async function update(action, path, options, message) {
+    if (isGraphProfile) return
     setBusy(action); setError(''); setSuccess('')
     try {
       const result = await api(path, options)
@@ -92,6 +291,7 @@ function Profile({ user, revision, onUpdate }) {
     } catch (err) { setError(err.message) } finally { setBusy('') }
   }
   function chooseFile(e) {
+    if (isGraphProfile) return
     const selected = e.target.files?.[0]
     setFile(null); setError(''); setSuccess('')
     if (!selected) return
@@ -101,7 +301,7 @@ function Profile({ user, revision, onUpdate }) {
   }
   function upload(e) {
     e.preventDefault()
-    if (!file || busy) return
+    if (!file || busy || isGraphProfile) return
     const body = new FormData()
     body.append('picture', file)
     update('upload', 'profile/picture/', { method: 'POST', body }, 'Profile picture updated.')
@@ -114,21 +314,30 @@ function Profile({ user, revision, onUpdate }) {
     {success && <div class="success" role="status">{success}</div>}
     <div class="detail-grid">
       <Panel title="Personal details"><div class="panel-body">
-        <form class="form" aria-label="Personal details" aria-busy={!!busy} onSubmit={e => { e.preventDefault(); if (!busy) update('name', 'profile/', { method: 'PATCH', body: { first_name: firstName, last_name: lastName } }, 'Profile details updated.') }}>
-          <div class="form-grid"><label>First name<input name="first_name" autoComplete="given-name" maxLength={150} value={firstName} disabled={!!busy} onInput={e => setFirstName(e.target.value)}/></label><label>Last name<input name="last_name" autoComplete="family-name" maxLength={150} value={lastName} disabled={!!busy} onInput={e => setLastName(e.target.value)}/></label></div>
+        <form class="form" aria-label="Personal details" aria-busy={!!busy} onSubmit={e => { e.preventDefault(); if (!busy && !isGraphProfile) update('name', 'profile/', { method: 'PATCH', body: { first_name: firstName, last_name: lastName } }, 'Profile details updated.') }}>
+          <div class="form-grid">
+            <label>
+              First name
+              <input name="first_name" autoComplete="given-name" maxLength={150} value={firstName} disabled={!!busy || isGraphProfile} onInput={e => setFirstName(e.target.value)}/>
+            </label>
+            <label>
+              Last name
+              <input name="last_name" autoComplete="family-name" maxLength={150} value={lastName} disabled={!!busy || isGraphProfile} onInput={e => setLastName(e.target.value)}/>
+            </label>
+          </div>
           <label>Username<input value={resource.data.username} readOnly autoComplete="username"/></label>
           <label>Email address<input value={resource.data.email || ''} readOnly autoComplete="email"/></label>
-          <p class="form-help">Username and email are managed by your identity provider or administrator.</p>
+          <p class="form-help">Username and email are managed by your identity provider or administrator.{isGraphProfile && " Your profile details are managed by Teams/Graph and cannot be edited here."}</p>
           <p class="muted">Signed in with {user.auth_source || 'Local'}.</p>
-          <div class="actions"><button class="button" disabled={!!busy}>{busy === 'name' ? 'Saving…' : 'Save details'}</button></div>
+          <div class="actions"><button class="button" disabled={!!busy || isGraphProfile}>{busy === 'name' ? 'Saving…' : 'Save details'}</button></div>
         </form>
       </div></Panel>
       <Panel title="Profile picture"><div class="panel-body">
         <div class="profile-picture"><UserAvatar user={{ ...user, picture_url: pictureUrl }} revision={revision} large/></div>
         <form class="form" aria-label="Profile picture" aria-busy={!!busy} onSubmit={upload}>
-          <label>Choose a picture<input ref={fileInput} name="picture" type="file" accept="image/jpeg,image/png,image/webp" aria-describedby="picture-help" disabled={!!busy} onChange={chooseFile}/></label>
+          <label>Choose a picture<input ref={fileInput} name="picture" type="file" accept="image/jpeg,image/png,image/webp" aria-describedby="picture-help" disabled={!!busy || isGraphProfile} onChange={chooseFile}/></label>
           <p class="form-help" id="picture-help">JPEG, PNG, or WEBP; up to 5 MiB and 4096 × 4096 pixels. Pictures are resized for your profile.</p>
-          <div class="actions"><button class="button" disabled={!!busy || !file}>{busy === 'upload' ? 'Uploading…' : 'Upload picture'}</button><button class="button secondary" type="button" disabled={!!busy || !pictureUrl} onClick={() => update('remove', 'profile/picture/', { method: 'DELETE' }, 'Profile picture removed.')}>{busy === 'remove' ? 'Removing…' : 'Remove picture'}</button></div>
+          <div class="actions"><button class="button" disabled={!!busy || !file || isGraphProfile}>{busy === 'upload' ? 'Uploading…' : 'Upload picture'}</button><button class="button secondary" type="button" disabled={!!busy || !pictureUrl || isGraphProfile} onClick={() => update('remove', 'profile/picture/', { method: 'DELETE' }, 'Profile picture removed.')}>{busy === 'remove' ? 'Removing…' : 'Remove picture'}</button></div>
         </form>
       </div></Panel>
     </div>
@@ -172,7 +381,7 @@ function Login({ session, onLogin }) {
 function AppointmentRow({ appointment }) { return <a class="list-row" href={`#/appointments/${appointment.id}`}><div class="date-tile">{date(appointment.starts_at, { month: 'short', day: undefined })}<strong>{new Date(appointment.starts_at).getDate()}</strong></div><div class="row-main"><strong>{appointment.call.contact.name}</strong><small>{appointment.call.contact.company?.name || appointment.call.contact.email}</small></div><div class="row-end"><strong style="font-size:12px">{time(appointment.starts_at)}</strong><div class="muted">{time(appointment.ends_at)}</div></div><Icon name="arrow" size={14}/></a> }
 function KpiTable({ title, rows }) { return <Panel title={title}><div class="table-wrap"><table><thead><tr><th>Name</th><th>Calls</th><th>Completed</th><th>Avg. rating</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td>{row.name}</td><td>{row.total_calls}</td><td>{row.completed_calls}</td><td>{row.average_rating == null ? '—' : Number(row.average_rating).toFixed(1)}</td></tr>)}</tbody></table>{!rows.length && <Empty title="Your insights will grow here">Start logging conversations to see results.</Empty>}</div></Panel> }
 function Dashboard({ user, version, openCreate }) {
-  const resource = useResource('kpis/', version), appointments = useResource('appointments/', version), calls = useResource('calls/', version), inbox = useResource('inbox/', version)
+  const resource = useResource('kpis/', version), appointments = useResource('appointments/', version), calls = useResource('calls/', version), inbox = useResource(user.graph_enabled ? null : 'inbox/', version)
   const authSource = <p class="muted">Signed in with {user.auth_source || "Local"}</p>
   if ([resource, appointments, calls, inbox].some(r => r.loading)) return <>{authSource}<Loading/></>
   const failed = [resource, appointments, calls, inbox].filter(r => r.error)
@@ -183,14 +392,26 @@ function Dashboard({ user, version, openCreate }) {
     const past = call.appointment && new Date(call.appointment.ends_at).getTime() < now
     return (past && ['scheduled', 'rescheduled'].includes(call.status)) || (call.status === 'completed' && (!call.summary?.trim() || call.rating == null))
   })
-  const unread = inbox.data.emails.filter(e => !e.is_read).length
+  const unread = inbox.data?.emails.filter(e => !e.is_read).length || 0
   const stats = [
     ['Total conversations', kpis.total_calls, 'All-time calls across your workspace', 'calls'],
     ['Completed calls', kpis.completed_calls, 'Conversations brought to a close', 'check'],
     ['Average rating', kpis.average_rating == null ? '—' : `${Number(kpis.average_rating).toFixed(1)} / 5`, 'Rated completed conversations', 'star'],
     ['Missed calls', `${Number(kpis.missed_percentage || 0).toFixed(1)}%`, `${Number(kpis.rescheduled_percentage || 0).toFixed(1)}% rescheduled`, 'clock'],
   ]
-  return <><PageHeading title="Your day, at a glance" subtitle="Stay connected. Keep the conversation moving."><button class="button" onClick={() => openCreate('call')}><Icon name="plus" size={16}/>Log a call</button></PageHeading><div class="welcome-strip"><div><h2>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user.name?.split(' ')[0] || user.username}.</h2>{authSource}<p class="muted">You have {upcoming.length} upcoming appointment{upcoming.length !== 1 ? 's' : ''} and {unread} unread message{unread !== 1 ? 's' : ''}. Let's make today count.</p></div><span class="plant" aria-hidden="true">✳</span></div><div class="stats">{stats.map(([label,value,caption,icon]) => <div class="stat" key={label}><div class="stat-top">{label}<span class="stat-icon"><Icon name={icon}/></span></div><div class="stat-value">{value}</div><p class="stat-caption">{caption}</p></div>)}</div><div class="dashboard-grid"><div><Panel title="Coming up next" count={upcoming.length} action={<a class="button quiet" href="#/calendar">View calendar <Icon name="arrow" size={13}/></a>}>{upcoming.slice(0,4).map(a => <AppointmentRow appointment={a} key={a.id}/>)}{!upcoming.length && <Empty title="A little breathing room" icon="calendar">No upcoming appointments. Schedule your next conversation.</Empty>}</Panel><Panel title="Conversations to wrap up" count={followups.length} action={<a class="button quiet" href="#/calls">All calls <Icon name="arrow" size={13}/></a>}>{followups.slice(0,4).map(call => <a class="list-row" key={call.id} href={`#/calls/${call.id}`}><span class="avatar">{initials(call.contact.name)}</span><div class="row-main"><strong>{call.contact.name}</strong><small>{call.status === 'completed' ? 'Add a summary or rating' : 'Update the call outcome'} · {date(call.appointment?.starts_at)}</small></div><Badge status={call.status}/><Icon name="arrow" size={14}/></a>)}{!followups.length && <Empty title="All caught up" icon="check">Your past conversations are up to date.</Empty>}</Panel></div><div><Panel title="Your inbox" count={unread} action={<a class="button quiet" href="#/inbox">View inbox <Icon name="arrow" size={13}/></a>}>{inbox.data.emails.slice().sort((a,b) => new Date(b.received_at)-new Date(a.received_at)).slice(0,4).map(email => <a class="list-row" href={`#/inbox/${email.id}`} key={email.id}><span class="avatar">{initials(email.contact.name)}</span><div class="row-main"><strong>{email.contact.name}{!email.is_read && <span class="notification-dot"/>}</strong><p class="muted truncate">{email.subject || '(No subject)'}</p><small>{date(email.received_at)}</small></div><Badge status={email.is_replied ? 'replied' : email.is_read ? 'read' : 'unread'}/></a>)}{!inbox.data.emails.length && <Empty title="A quiet inbox" icon="inbox">Incoming messages will appear here.</Empty>}</Panel><Panel title="A note on your numbers"><div class="panel-body"><p class="muted">Your insights cover all time. Missed and rescheduled percentages use non-scheduled calls as their denominator. Average ratings include rated, completed calls only.</p></div></Panel></div></div><div class="dashboard-grid"><KpiTable title="Performance by contact" rows={kpis.by_contact || []}/><KpiTable title="Performance by company" rows={kpis.by_company || []}/></div></>
+  return <>
+    <PageHeading title="Your day, at a glance" subtitle="Stay connected. Keep the conversation moving."><button class="button" onClick={() => openCreate('call')}><Icon name="plus" size={16}/>Log a call</button></PageHeading>
+    <div class="welcome-strip"><div><h2>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user.name?.split(' ')[0] || user.username}.</h2>{authSource}<p class="muted">{user.graph_enabled ? 'Your Microsoft calendar and inbox are below. CRM calls and insights remain in your workspace.' : `You have ${upcoming.length} upcoming appointment${upcoming.length !== 1 ? 's' : ''} and ${unread} unread message${unread !== 1 ? 's' : ''}. Let's make today count.`}</p></div><span class="plant" aria-hidden="true">✳</span></div>
+    <div class="stats">{stats.map(([label,value,caption,icon]) => <div class="stat" key={label}><div class="stat-top">{label}<span class="stat-icon"><Icon name={icon}/></span></div><div class="stat-value">{value}</div><p class="stat-caption">{caption}</p></div>)}</div>
+    <div class="dashboard-grid"><div>
+      {user.graph_enabled ? <GraphCalendar version={version} compact/> : <Panel title="Coming up next" count={upcoming.length} action={<a class="button quiet" href="#/calendar">View calendar <Icon name="arrow" size={13}/></a>}>{upcoming.slice(0,4).map(a => <AppointmentRow appointment={a} key={a.id}/>)}{!upcoming.length && <Empty title="A little breathing room" icon="calendar">No upcoming appointments. Schedule your next conversation.</Empty>}</Panel>}
+      <Panel title="Conversations to wrap up" count={followups.length} action={<a class="button quiet" href="#/calls">All calls <Icon name="arrow" size={13}/></a>}>{followups.slice(0,4).map(call => <a class="list-row" key={call.id} href={`#/calls/${call.id}`}><span class="avatar">{initials(call.contact.name)}</span><div class="row-main"><strong>{call.contact.name}</strong><small>{call.status === 'completed' ? 'Add a summary or rating' : 'Update the call outcome'} · {date(call.appointment?.starts_at)}</small></div><Badge status={call.status}/><Icon name="arrow" size={14}/></a>)}{!followups.length && <Empty title="All caught up" icon="check">Your past conversations are up to date.</Empty>}</Panel>
+    </div><div>
+      {user.graph_enabled ? <GraphInbox version={version} compact/> : <Panel title="Your inbox" count={unread} action={<a class="button quiet" href="#/inbox">View inbox <Icon name="arrow" size={13}/></a>}>{inbox.data.emails.slice().sort((a,b) => new Date(b.received_at)-new Date(a.received_at)).slice(0,4).map(email => <a class="list-row" href={`#/inbox/${email.id}`} key={email.id}><span class="avatar">{initials(email.contact.name)}</span><div class="row-main"><strong>{email.contact.name}{!email.is_read && <span class="notification-dot"/>}</strong><p class="muted truncate">{email.subject || '(No subject)'}</p><small>{date(email.received_at)}</small></div><Badge status={email.is_replied ? 'replied' : email.is_read ? 'read' : 'unread'}/></a>)}{!inbox.data.emails.length && <Empty title="A quiet inbox" icon="inbox">Incoming messages will appear here.</Empty>}</Panel>}
+      <Panel title="A note on your numbers"><div class="panel-body"><p class="muted">Your insights cover all time. Missed and rescheduled percentages use non-scheduled calls as their denominator. Average ratings include rated, completed calls only.</p></div></Panel>
+    </div></div>
+    <div class="dashboard-grid"><KpiTable title="Performance by contact" rows={kpis.by_contact || []}/><KpiTable title="Performance by company" rows={kpis.by_company || []}/></div>
+  </>
 }
 function Calls({ version, openCreate }) {
   const r = useResource('calls/', version)
@@ -295,25 +516,35 @@ function CreateForm({ type, initialId, done, close }) {
   </form>
 }
 export function App() {
-  const [session,setSession] = useState(null), [loading,setLoading] = useState(true), [error,setError] = useState(''), [route,setRoute] = useState(location.hash.slice(1) || '/dashboard'), [version,setVersion] = useState(0), [modal,setModal] = useState(null), [mobile,setMobile] = useState(false), [signingOut,setSigningOut] = useState(false)
+  if (location.pathname === '/teams/config/') return <TeamsConfig/>
+  if (location.pathname === '/teams/tab/') return <TeamsTab/>
+  return <WorkspaceApp/>
+}
+
+function WorkspaceApp({ initialSession = null, embedded = false, onSessionEnd }) {
+  const [session,setSession] = useState(initialSession), [loading,setLoading] = useState(!initialSession), [error,setError] = useState(''), [route,setRoute] = useState(location.hash.slice(1) || '/dashboard'), [version,setVersion] = useState(0), [modal,setModal] = useState(null), [mobile,setMobile] = useState(false), [signingOut,setSigningOut] = useState(false)
   const [profileRevision, setProfileRevision] = useState(0)
   async function loadSession() { setError(''); const value = await api('session/');setSession(value);return value }
   async function refreshProfile() { setProfileRevision(n => n + 1); await loadSession() }
   useEffect(() => {
-    loadSession().catch(e => setError(e.message)).finally(() => setLoading(false))
+    if (!initialSession) loadSession().catch(e => setError(e.message)).finally(() => setLoading(false))
     const hash = () => {setRoute(location.hash.slice(1) || '/dashboard');setMobile(false);setModal(null);window.scrollTo(0,0)}
-    const expired = () => {setSession({user:null,agent:null,providers:session?.providers || []});setModal(null);loadSession().catch(e => setError(e.message))}
+    const expired = () => {
+      setSession({user:null,agent:null,providers:session?.providers || []});setModal(null)
+      if (embedded) onSessionEnd()
+      else loadSession().catch(e => setError(e.message))
+    }
     window.addEventListener('hashchange',hash);window.addEventListener('session-expired',expired)
     return () => {window.removeEventListener('hashchange',hash);window.removeEventListener('session-expired',expired)}
   }, [])
   useEffect(() => { if (session?.user && (!location.hash || route === '/login' || route === '/')) location.hash='/dashboard' },[session,route])
-  async function logout() {setSigningOut(true);setError('');try{await api('logout/',{method:'POST'});await loadSession();location.hash='/login'}catch(e){setError(e.message)}finally{setSigningOut(false)}}
+  async function logout() {setSigningOut(true);setError('');try{await api('logout/',{method:'POST'});if (embedded) onSessionEnd();else {await loadSession();location.hash='/login'}}catch(e){setError(e.message)}finally{setSigningOut(false)}}
   const refresh = () => setVersion(n => n+1)
   const openCreate = (type,initialId) => setModal({type,initialId})
   function done(type,result) {setModal(null);refresh();const id = result.id || result[type]?.id;if (id && ['call','appointment'].includes(type)) location.hash=`/${type === 'call' ? 'calls' : 'appointments'}/${id}`}
   if (loading) return <Loading/>
   if (!session) return <div class="provision"><div class="brand" style="color:#294733;justify-content:center;margin-bottom:25px"><span class="brand-mark">g</span>gather.</div><ErrorNotice error={error} retry={() => {setLoading(true);loadSession().catch(e=>setError(e.message)).finally(()=>setLoading(false))}}/></div>
-  if (!session.user) return <Login session={session} onLogin={loadSession}/>
+  if (!session.user) return embedded ? <ErrorNotice error="Your Teams session has ended. Reload this tab to sign in again."/> : <Login session={session} onLogin={loadSession}/>
   const parts = route.split('/').filter(Boolean), section = !session.agent && parts[0] !== 'profile' ? 'access' : parts[0] || 'dashboard', id = /^\d+$/.test(parts[1] || '') ? parts[1] : null
   const props = {version,refresh,openCreate}
   let page
@@ -322,9 +553,9 @@ export function App() {
   else if (section === 'dashboard') page = <Dashboard user={session.user} {...props}/>
   else if (section === 'calls') page = id ? <CallDetail key={id} id={id} {...props}/> : <Calls {...props}/>
   else if (section === 'appointments' && id) page = <AppointmentDetail key={id} id={id} {...props}/>
-  else if (section === 'calendar') page = <Calendar {...props}/>
+  else if (section === 'calendar') page = session.user.graph_enabled ? <GraphCalendar {...props}/> : <Calendar {...props}/>
   else if (section === 'contacts') page = <Contacts {...props}/>
-  else if (section === 'inbox') page = <Inbox id={id} {...props}/>
+  else if (section === 'inbox') page = session.user.graph_enabled ? <GraphInbox {...props}/> : <Inbox id={id} {...props}/>
   else page = <Empty title="This page wandered off"><a class="link" href="#/dashboard">Return to your overview →</a></Empty>
   return <>
     <a class="skip-link" href="#main-content" onClick={e => {e.preventDefault();document.getElementById('main-content').focus()}}>Skip to content</a>
@@ -338,8 +569,8 @@ export function App() {
         <div class="workspace">Your workspace</div>
         <nav class="nav" aria-label="Main navigation">{(session.agent ? ['dashboard','calls','calendar','contacts','inbox','profile'] : ['access','profile']).map(item => <a href={`#/${item}`} key={item} class={section === item || (item === 'calendar' && section === 'appointments') ? 'active' : ''} aria-current={section === item || (item === 'calendar' && section === 'appointments') ? 'page' : undefined} onClick={() => setMobile(false)}><Icon name={item}/>{labels[item]}</a>)}</nav>
         <div class="sidebar-bottom">
-          <a href="/accounts/3rdparty/">Manage identity connections ↗</a>
-          <div class="user"><UserAvatar key={session.user.id} user={session.user} revision={profileRevision}/><div><strong>{session.user.name || session.user.username}</strong><small>{session.agent?.companies?.[0]?.name || 'Workspace access pending'}</small></div></div>
+          <a href="/accounts/3rdparty/" target={embedded ? '_blank' : undefined} rel={embedded ? 'noopener noreferrer' : undefined}>Manage identity connections ↗</a>
+          <div class="user"><UserAvatar key={session.user.id} user={session.user} revision={profileRevision}/><div><strong>{session.user.name || session.user.username} <GraphPresenceIndicator user={session.user}/></strong><small>{session.agent?.companies?.[0]?.name || 'Workspace access pending'}</small></div></div>
           <button class="signout" disabled={signingOut} onClick={logout}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
         </div>
       </aside>
@@ -351,7 +582,7 @@ export function App() {
           </div>
           <div class="today"><Icon name="calendar" size={15}/><span class="date-label">{date(new Date(),{weekday:'short',year:'numeric'})}</span></div>
         </header>
-        <div class="content" id="main-content" tabIndex={-1}><ErrorNotice error={error}/>{page}</div>
+        <div class="content" id="main-content" tabIndex={-1}><ErrorNotice error={error}/><ErrorNotice error={session.graph_error || session.user.graph_error}/>{page}</div>
       </main>
     </div>
     {modal && session.agent && <Dialog title={modal.type === 'call' ? 'Log a conversation' : modal.type === 'contact' ? 'Add a new contact' : modal.type === 'company' ? 'Add a company' : 'Schedule a conversation'} close={() => setModal(null)}><CreateForm {...modal} done={done} close={() => setModal(null)}/></Dialog>}

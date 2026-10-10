@@ -1,7 +1,31 @@
+from django.conf import settings
 from django.core.exceptions import RequestDataTooBig, SuspiciousOperation
 from django.core.files.uploadhandler import MemoryFileUploadHandler
 from django.http.multipartparser import MultiPartParserError
 from django.middleware.csrf import CsrfViewMiddleware
+
+
+class TeamsFrameMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        is_tab = request.path in ("/teams/tab/", "/teams/config/")
+        if settings.TEAMS_ENABLED and is_tab:
+            response.headers.pop("X-Frame-Options", None)
+            policy = response.get("Content-Security-Policy", "")
+            directives = [
+                item.strip() for item in policy.split(";")
+                if item.strip() and not item.strip().lower().startswith("frame-ancestors")
+            ]
+            directives.append(
+                "frame-ancestors 'self' https://teams.microsoft.com "
+                "https://*.teams.microsoft.com https://*.cloud.microsoft "
+                "https://*.office.com https://*.microsoft365.com"
+            )
+            response["Content-Security-Policy"] = "; ".join(directives)
+        return response
 
 
 class ProfileUploadHandler(MemoryFileUploadHandler):
