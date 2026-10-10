@@ -44,7 +44,9 @@ jobs:
         uses: docker/metadata-action@v6.2.0
         with:
           images: ${{ vars.REGISTRY_HOST }}/${{ github.repository }}
-          tags: type=sha,format=long
+          tags: |
+            type=schedule,pattern={{date 'YYYYMMDD'}}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
       - name: Log in to registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
