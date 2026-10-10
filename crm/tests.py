@@ -534,6 +534,72 @@ class ModelTests(TestCase):
             self.assertIn(model, admin.site._registry)
 
 
+@override_settings(SECURE_SSL_REDIRECT=False)
+class OIDCPageStylingTests(TestCase):
+    def setUp(self):
+        configured = configure_oidc(json.dumps([{
+            "id": "nublar", "name": "Nublar", "server_url": "https://issuer.example",
+            "client_id": "portal", "client_secret": "test-value",
+        }]), debug=False)
+        self.settings_override = override_settings(SOCIALACCOUNT_PROVIDERS=configured)
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+
+    def assert_styled(self, response, *, status=200):
+        self.assertEqual(response.status_code, status)
+        self.assertTemplateUsed(response, "allauth/layouts/base.html")
+        self.assertContains(response, '<div class="auth-page">', status_code=status)
+        self.assertContains(response, '<section class="auth-card">', status_code=status)
+        self.assertContains(response, ".auth-card button", status_code=status)
+
+    def test_errors_and_cancellation_share_styled_layout(self):
+        for url, template, status in (
+            ("/accounts/3rdparty/login/error/", "authentication_error", 401),
+            ("/accounts/3rdparty/login/cancelled/", "login_cancelled", 200),
+            ("/accounts/oidc/nublar/login/callback/", "authentication_error", 401),
+        ):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assert_styled(response, status=status)
+                self.assertTemplateUsed(response, f"socialaccount/{template}.html")
+
+    def test_strict_cookie_callback_redirect_shares_styled_layout(self):
+        with override_settings(SESSION_COOKIE_SAMESITE="Strict"):
+            response = self.client.get("/accounts/oidc/nublar/login/callback/")
+        self.assert_styled(response)
+        self.assertTemplateUsed(response, "socialaccount/login_redirect.html")
+        self.assertContains(response, 'http-equiv="refresh"')
+        self.assertContains(response, "/accounts/oidc/nublar/login/callback/?_redir=")
+        self.assertContains(response, "Continue")
+
+    def test_social_signup_shares_styled_layout(self):
+        sociallogin = SocialLogin(
+            user=get_user_model()(username="new-agent"),
+            account=SocialAccount(provider="nublar", uid="new-subject"),
+        )
+        with patch(
+            "allauth.socialaccount.internal.flows.signup.get_pending_signup",
+            return_value=sociallogin,
+        ):
+            response = self.client.get("/accounts/3rdparty/signup/")
+        self.assert_styled(response)
+        self.assertTemplateUsed(response, "socialaccount/signup.html")
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+
+    def test_connections_and_connect_confirmation_share_styled_layout(self):
+        user = get_user_model().objects.create_user("connected-agent")
+        SocialAccount.objects.create(user=user, provider="nublar", uid="linked-subject")
+        self.client.force_login(user)
+        response = self.client.get("/accounts/3rdparty/")
+        self.assert_styled(response)
+        self.assertTemplateUsed(response, "socialaccount/connections.html")
+        self.assertContains(response, 'name="account"')
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        response = self.client.get("/accounts/oidc/nublar/login/?process=connect")
+        self.assert_styled(response)
+        self.assertContains(response, "Connect Nublar")
+
+
 class OIDCSettingsTests(TestCase):
     def test_authentication_templates_are_packaged_and_trigger_image_builds(self):
         root = Path(__file__).resolve().parent.parent
