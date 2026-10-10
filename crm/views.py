@@ -183,8 +183,12 @@ def session_json(request):
             "picture_url": picture_url(request.user),
         }
         try:
-            profile = Agent.objects.select_related("company").get(user=request.user)
-            agent = {"id": profile.pk, "company": company_json(profile.company)}
+            profile = Agent.objects.select_related("company").prefetch_related("companies").get(user=request.user)
+            agent = {
+                "id": profile.pk,
+                "company": company_json(profile.company),
+                "companies": [company_json(company) for company in profile.companies.all()],
+            }
         except Agent.DoesNotExist:
             pass
     providers = [
