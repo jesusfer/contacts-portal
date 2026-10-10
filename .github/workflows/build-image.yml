@@ -46,8 +46,8 @@ jobs:
         with:
           images: ${{ vars.REGISTRY_HOST }}/${{ github.repository }}
           tags: |
-            type=schedule,pattern={{date 'YYYYMMDD'}}
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=ref,event=tag
+            type=ref,event=branch
       - name: Log in to registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
