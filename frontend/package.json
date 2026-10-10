@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@microsoft/teams-js": "2.58.0",
     "preact": "11.0.1"
   },
   "devDependencies": {

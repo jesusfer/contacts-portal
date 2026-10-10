@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from functools import wraps
 
 from allauth.core import ratelimit
@@ -7,17 +8,23 @@ from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.core.exceptions import ObjectDoesNotExist, RequestDataTooBig, SuspiciousOperation, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, Q
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.http.multipartparser import MultiPartParserError
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.cache import patch_cache_control
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from .forms import AppointmentForm, CallForm, CompanyForm, ContactForm, EmailForm
 from .models import Agent, Appointment, Call, Company, Contact, Email, UserProfile
 from .pictures import normalize_picture
 from .signals import AUTH_SOURCE_SESSION_KEY
+from .graph import GraphClient, GraphClientError, InvalidCursor, TokenExpiredError
+from .teams import (
+    GraphTokenManager, TeamsConfigError, TeamsTokenError, exchange_graph_token,
+    get_teams_account, graph_provider, load_teams_config, provider_tenant, validate_teams_token,
+)
 
 
 def error(message, status=400, **extra):
@@ -30,8 +37,7 @@ def csrf_failure(request, reason=""):
 
 def api(methods, *, agent_required=True):
     def decorate(view):
-        @wraps(view)
-        def wrapped(request, *args, **kwargs):
+        def dispatch(request, *args, **kwargs):
             if request.method not in methods:
                 response = error("Method not allowed.", 405)
                 response["Allow"] = ", ".join(methods)
@@ -51,8 +57,21 @@ def api(methods, *, agent_required=True):
                 return error("Validation failed.", fields=getattr(exc, "message_dict", {"__all__": exc.messages}))
             except IntegrityError:
                 return error("The data conflicts with an existing record or constraint.", 400)
+            except GraphClientError as exc:
+                return error(exc.public_message, exc.status)
+            except InvalidCursor:
+                return error("Invalid or expired page cursor.", 400)
             except (SuspiciousOperation, MultiPartParserError):
                 return error("Malformed or oversized request.", 400)
+        @wraps(view)
+        def wrapped(request, *args, **kwargs):
+            response = dispatch(request, *args, **kwargs)
+            if request.path.startswith("/api/graph/") or (
+                request.path in {"/api/profile/", "/api/session/", "/api/teams/sso/"}
+                and graph_enabled(request)
+            ):
+                patch_cache_control(response, private=True, no_store=True)
+            return response
         return wrapped
     return decorate
 
@@ -75,7 +94,7 @@ def payload(request, schema, *, required=()):
     for key, value in data.items():
         if type(value) not in schema[key]:
             raise ValidationError({key: "Invalid value type."})
-        if key.endswith("_id") and value <= 0:
+        if key.endswith("_id") and isinstance(value, int) and value <= 0:
             raise ValidationError({key: "Use a positive integer ID."})
     return data
 
@@ -163,6 +182,7 @@ def email_json(email):
 def session_json(request):
     user = None
     agent = None
+    graph_error = None
     if request.user.is_authenticated:
         provider_id = request.session.get(AUTH_SOURCE_SESSION_KEY)
         auth_source = "Local"
@@ -182,6 +202,21 @@ def session_json(request):
             "auth_source": auth_source,
             "picture_url": picture_url(request.user),
         }
+        if graph_enabled(request):
+            user.update({
+                "email": request.user.email, "first_name": request.user.first_name,
+                "last_name": request.user.last_name, "read_only": True, "graph_enabled": True,
+                "picture_url": None,
+            })
+            try:
+                details = graph_profile_json(request)
+                user.update({
+                    "name": details["display_name"] or user["name"],
+                    "email": details["email"], "first_name": details["first_name"],
+                    "last_name": details["last_name"], "picture_url": details["picture_url"],
+                })
+            except GraphClientError as exc:
+                graph_error = exc.public_message
         try:
             profile = Agent.objects.prefetch_related("companies").get(user=request.user)
             companies = [company_json(company) for company in profile.companies.all()]
@@ -198,7 +233,10 @@ def session_json(request):
         }
         for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
     ]
-    return {"user": user, "agent": agent, "providers": providers}
+    result = {"user": user, "agent": agent, "providers": providers}
+    if graph_error:
+        result["graph_error"] = graph_error
+    return result
 
 
 def picture_url(user):
@@ -220,6 +258,22 @@ def profile_json(user):
 def profile(request):
     if not request.user.is_authenticated:
         return error("Authentication required.", 401)
+    if graph_enabled(request):
+        if request.method != "GET":
+            return error("Graph profiles are read-only.", 403)
+        try:
+            details = graph_profile_json(request)
+            return JsonResponse({
+                "id": request.user.pk, "username": request.user.get_username(),
+                "first_name": details["first_name"], "last_name": details["last_name"],
+                "email": details["email"], "picture_url": details["picture_url"],
+                "read_only": True, "graph_enabled": True,
+            })
+        except GraphClientError as exc:
+            return JsonResponse({
+                **profile_json(request.user), "read_only": True, "graph_enabled": True,
+                "picture_url": None, "graph_error": exc.public_message,
+            })
     if request.method == "PATCH":
         data = payload(request, {"first_name": TEXT, "last_name": TEXT})
         for field, value in data.items():
@@ -236,6 +290,10 @@ def profile(request):
 def profile_picture(request):
     if not request.user.is_authenticated:
         return error("Authentication required.", 401)
+    if graph_enabled(request):
+        if request.method != "GET":
+            return error("Graph profiles are read-only.", 403)
+        return graph_picture(request)
     if request.method == "GET":
         item = get_object_or_404(UserProfile.objects.exclude(picture=""), user=request.user)
         try:
@@ -463,6 +521,146 @@ def kpis(request):
             for row in rows
         ]
     return JsonResponse(totals)
+
+
+
+
+def graph_enabled(request):
+    return graph_provider(request.session.get(AUTH_SOURCE_SESSION_KEY)) is not None
+
+
+def _get_graph_client(request):
+    provider_id = request.session.get(AUTH_SOURCE_SESSION_KEY)
+    if not graph_enabled(request):
+        raise TokenExpiredError("Graph authorization required. Sign in again.")
+    app = graph_provider(provider_id)
+    token = GraphTokenManager.get_token(request, provider_id)
+    return GraphClient(
+        token, provider_tenant(app), user_id=request.user.pk, provider_id=provider_id,
+    )
+
+
+def graph_profile_json(request, details=None):
+    if not hasattr(request, "_graph_profile"):
+        if details is None:
+            details = _get_graph_client(request).get_profile()
+        stored = request.session.get(GraphTokenManager.SESSION_KEY, {}).get(
+            request.session.get(AUTH_SOURCE_SESSION_KEY), {},
+        )
+        if stored.get("oid") and details.get("id") != stored["oid"]:
+            raise TokenExpiredError("Graph identity mismatch. Sign in again.")
+        request._graph_profile = {
+            "id": details.get("id"), "display_name": details.get("displayName") or "",
+            "first_name": details.get("givenName") or "", "last_name": details.get("surname") or "",
+            "email": details.get("mail") or details.get("userPrincipalName") or "",
+            "mail": details.get("mail"),
+            "user_principal_name": details.get("userPrincipalName"),
+            "picture_url": "/api/graph/picture/" if details.get("id") else None,
+            "read_only": True,
+        }
+    return request._graph_profile
+
+
+@api(["GET"], agent_required=False)
+def graph_profile(request):
+    if not request.user.is_authenticated:
+        return error("Authentication required.", 401)
+    return JsonResponse(graph_profile_json(request))
+
+
+@api(["GET"], agent_required=False)
+def graph_picture(request):
+    if not request.user.is_authenticated:
+        return error("Authentication required.", 401)
+    photo = _get_graph_client(request).get_photo()
+    if photo is None:
+        raise Http404
+    response = HttpResponse(photo, content_type="image/jpeg")
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@api(["GET"], agent_required=False)
+def graph_calendar(request):
+    if not request.user.is_authenticated:
+        return error("Authentication required.", 401)
+    from django.utils.dateparse import parse_datetime
+    now = timezone.now()
+    try:
+        start_dt = parse_datetime(request.GET["start"]) if "start" in request.GET else now - timedelta(days=30)
+        end_dt = parse_datetime(request.GET["end"]) if "end" in request.GET else now + timedelta(days=30)
+        if not start_dt or not end_dt or timezone.is_naive(start_dt) or timezone.is_naive(end_dt):
+            raise ValueError
+        if start_dt >= end_dt or end_dt - start_dt > timedelta(days=366):
+            raise ValueError
+    except (ValueError, TypeError):
+        return error("Use an ordered, timezone-aware ISO 8601 range of at most 366 days.", 400)
+    return JsonResponse(_get_graph_client(request).get_calendar_view(
+        start_dt, end_dt, page=request.GET.get("page"),
+    ))
+
+
+@api(["GET"], agent_required=False)
+def graph_inbox(request):
+    if not request.user.is_authenticated:
+        return error("Authentication required.", 401)
+    return JsonResponse(_get_graph_client(request).get_mailbox_messages(page=request.GET.get("page")))
+
+
+@api(["GET"], agent_required=False)
+def graph_presence(request):
+    if not request.user.is_authenticated:
+        return error("Authentication required.", 401)
+    return JsonResponse(_get_graph_client(request).get_presence())
+
+
+@ensure_csrf_cookie
+@api(["GET"], agent_required=False)
+def teams_config(request):
+    providers = settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
+    return JsonResponse({"providers": [{
+        "id": app["provider_id"], "provider_id": app["provider_id"], "name": app["name"],
+        "client_id": app["client_id"], "resource": app["settings"]["teams"]["resource"],
+    } for app in providers if graph_provider(app["provider_id"]) and app["settings"].get("teams")]})
+
+
+@api(["POST"], agent_required=False)
+def teams_sso(request):
+    if len(request.body) > 32768:
+        return error("Teams SSO request is too large.", 400)
+    data = payload(request, {"provider_id": TEXT, "token": TEXT}, required=("provider_id", "token"))
+    if not 256 <= len(data["token"]) <= 16384 or not 1 <= len(data["provider_id"]) <= 255:
+        return error("Invalid Teams SSO input size.", 400)
+    provider_id = data["provider_id"]
+    if not ratelimit.consume(request, action="login"):
+        response = error("Teams SSO rate limited. Try again later.", 429)
+        response["Retry-After"] = "300"
+        return response
+    app = graph_provider(provider_id)
+    if not app or not app["settings"].get("teams"):
+        return error("Teams provider not found.", 404)
+    try:
+        config = load_teams_config(app["settings"])
+        claims = validate_teams_token(data["token"], config)
+        account = get_teams_account(provider_id, claims)
+        token = exchange_graph_token(app, assertion=data["token"])
+        profile_data = GraphClient(token["access_token"], config["tenant_id"]).get_profile()
+        if profile_data.get("id") != claims["oid"]:
+            raise TeamsTokenError("Graph identity does not match the Teams identity.")
+        login(request, account.user, backend="allauth.account.auth_backends.AuthenticationBackend")
+        request.session[AUTH_SOURCE_SESSION_KEY] = provider_id
+        GraphTokenManager.store_token(
+            request, provider_id, token["access_token"], token.get("refresh_token"),
+            token["expires_in"], config["tenant_id"], oid=claims["oid"],
+        )
+        request.session["crm_teams_authenticated"] = True
+        graph_profile_json(request, profile_data)
+        return JsonResponse(session_json(request))
+    except TeamsTokenError as exc:
+        return error(exc.public_message, 403)
+    except TeamsConfigError:
+        return error("Teams provider configuration unavailable.", 502)
 
 
 def spa(request):

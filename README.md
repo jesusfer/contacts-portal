@@ -179,6 +179,11 @@ dashboard displays OIDC rather than guessing a provider name.
 
 ## User profiles
 
+For Microsoft Teams static/configurable tabs, automatic SSO, and delegated
+Microsoft Graph calendar, inbox, profile, and presence integration, see
+[teams.md](teams.md). Providers named `entraid...` use Graph-backed, read-only
+profile/calendar/inbox views; the local behavior below applies to other logins.
+
 Signed-in users can open **Profile** to update their first and last names and
 upload, replace, or remove their profile picture. Profile access is available
 even before an administrator provisions an Agent. Names and pictures update
@@ -234,7 +239,9 @@ except through a proxy that strips untrusted forwarded headers.
 - Inbox controls track read/replied state. They **do not send or fetch email**.
   Received messages can be entered/imported by an administrator or posted to
   the agent-scoped `/api/inbox/` endpoint. Marking replied records an action
-  performed outside the portal.
+  performed outside the portal. This describes the local CRM inbox; `entraid`
+  sessions instead display the user's read-only Microsoft Graph Inbox and
+  default calendar, without importing those items into CRM records.
 
 All mutation endpoints require Django's CSRF token and a signed-in session;
 API routes live under `/api/`. User and agent provisioning is deliberately
