@@ -28,8 +28,9 @@ def store_graph_tokens(sender, request, user, sociallogin=None, **kwargs):
     if not app or token is None or not token.token or token.expires_at is None:
         return
     oid, tid = account_identity(sociallogin.account.extra_data)
-    tenant = provider_tenant(app)
-    if tid and tid != tenant:
+    try:
+        tenant = provider_tenant(app, tid)
+    except ValueError:
         return
     GraphTokenManager.store_token(
         request, provider_id, token.token, token.token_secret,

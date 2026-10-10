@@ -35,6 +35,14 @@ class TeamsConfigurationTests(SimpleTestCase):
         self.assertEqual(app["settings"]["teams"]["authorized_client_ids"], TEAMS_CLIENT_IDS)
         self.assertEqual(app["settings"]["teams"]["audience"], app["client_id"])
 
+    def test_organizations_issuer_defaults_and_teams(self):
+        app = self.configure(self.provider(
+            server_url="https://login.microsoftonline.com/organizations/v2.0",
+            teams={"resource": "api://portal.example.com/11111111-1111-1111-1111-111111111111"},
+        ))
+        self.assertEqual(app["settings"]["graph_tenant_id"], "organizations")
+        self.assertEqual(app["settings"]["teams"]["tenant_id"], "organizations")
+
     def test_graph_selection_uses_name_not_identifier(self):
         app = self.configure(self.provider(id="corporate", name="ENTRAID-corporate"))
         self.assertEqual(app["settings"]["scope"], GRAPH_SCOPES)
@@ -60,6 +68,7 @@ class TeamsConfigurationTests(SimpleTestCase):
         for issuer in (
             "https://identity.example.com",
             "https://login.microsoftonline.com/common/v2.0",
+            "https://login.microsoftonline.com/consumers/v2.0",
             "https://login.microsoftonline.com/22222222-2222-2222-2222-222222222222",
         ):
             with self.subTest(issuer=issuer), self.assertRaises(ImproperlyConfigured):

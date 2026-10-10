@@ -84,16 +84,21 @@ def configure_oidc(raw, *, debug):
             app_settings["scope"] = scope
         if graph_enabled:
             parts = url.path.rstrip("/").split("/")
-            try:
-                tenant_id = str(UUID(parts[1])) if len(parts) == 3 and parts[2] == "v2.0" else None
-            except ValueError:
-                tenant_id = None
+            tenant_id = None
+            if len(parts) == 3 and parts[2] == "v2.0":
+                if parts[1] == "organizations":
+                    tenant_id = "organizations"
+                else:
+                    try:
+                        tenant_id = str(UUID(parts[1]))
+                    except ValueError:
+                        pass
             if (
                 not tenant_id or url.scheme != "https"
                 or url.netloc != "login.microsoftonline.com"
             ):
                 raise ImproperlyConfigured(
-                    "entraid providers require https://login.microsoftonline.com/<tenant UUID>/v2.0."
+                    "entraid providers require a tenant UUID or organizations issuer on login.microsoftonline.com."
                 )
             app_settings["graph_tenant_id"] = tenant_id
         teams = provider.get("teams")
@@ -104,9 +109,15 @@ def configure_oidc(raw, *, debug):
                 raise ImproperlyConfigured("Unknown teams OIDC setting.")
             try:
                 client_id = str(UUID(provider["client_id"]))
-                teams_tenant = str(UUID(teams.get("tenant_id", tenant_id)))
+                configured_tenant = teams.get("tenant_id", tenant_id)
+                teams_tenant = (
+                    "organizations" if configured_tenant == "organizations"
+                    else str(UUID(configured_tenant))
+                )
             except (ValueError, TypeError, AttributeError) as exc:
-                raise ImproperlyConfigured("Teams client and tenant IDs must be UUIDs.") from exc
+                raise ImproperlyConfigured(
+                    "Teams tenant_id must be a UUID or organizations."
+                ) from exc
             if teams_tenant != tenant_id:
                 raise ImproperlyConfigured("Teams tenant_id must match the OIDC issuer tenant.")
             audience = teams.get("audience", client_id)
@@ -138,7 +149,10 @@ def configure_oidc(raw, *, debug):
             "secret": provider["client_secret"],
             "settings": app_settings,
         })
-    return {"openid_connect": {"APPS": apps}}
+    return {"openid_connect": {
+        "APPS": apps,
+        "provider_class": "crm.openid_connect.TenantAwareOpenIDConnectProvider",
+    }}
 
 
 SOCIALACCOUNT_PROVIDERS = configure_oidc(os.environ.get("OIDC_PROVIDERS", "[]"), debug=DEBUG)
