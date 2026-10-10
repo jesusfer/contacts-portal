@@ -339,7 +339,7 @@ export function App() {
         <nav class="nav" aria-label="Main navigation">{(session.agent ? ['dashboard','calls','calendar','contacts','inbox','profile'] : ['access','profile']).map(item => <a href={`#/${item}`} key={item} class={section === item || (item === 'calendar' && section === 'appointments') ? 'active' : ''} aria-current={section === item || (item === 'calendar' && section === 'appointments') ? 'page' : undefined} onClick={() => setMobile(false)}><Icon name={item}/>{labels[item]}</a>)}</nav>
         <div class="sidebar-bottom">
           <a href="/accounts/3rdparty/">Manage identity connections ↗</a>
-          <div class="user"><UserAvatar key={session.user.id} user={session.user} revision={profileRevision}/><div><strong>{session.user.name || session.user.username}</strong><small>{session.agent?.company?.name || 'Workspace access pending'}</small></div></div>
+          <div class="user"><UserAvatar key={session.user.id} user={session.user} revision={profileRevision}/><div><strong>{session.user.name || session.user.username}</strong><small>{session.agent?.companies?.[0]?.name || 'Workspace access pending'}</small></div></div>
           <button class="signout" disabled={signingOut} onClick={logout}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
         </div>
       </aside>
