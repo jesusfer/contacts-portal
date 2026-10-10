@@ -1,0 +1,92 @@
+{% load i18n %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#172c26">
+    <title>{% block head_title %}{% endblock head_title %} · Gather</title>
+    {% block extra_head %}{% endblock extra_head %}
+    <style>
+        *{box-sizing:border-box}
+        body{margin:0;background:#f5f6f2;color:#263b34;font:14px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+        a{color:#577d42}
+        button,input,select,textarea{font:inherit}
+        button{cursor:pointer}
+        a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #85ad68;outline-offset:3px}
+        .auth-page{min-height:100vh;display:grid;grid-template-columns:1fr 1fr}
+        .auth-brand-panel{background:#172c26;color:#fff;padding:52px 10%;display:flex;flex-direction:column;justify-content:space-between}
+        .auth-brand{display:flex;align-items:center;gap:11px;color:#fff;text-decoration:none;font-size:27px;font-weight:700;letter-spacing:-1px}
+        .auth-brand-mark{display:grid;place-items:center;width:37px;height:37px;border-radius:11px;background:#d5edb7;color:#24382a;font-size:23px}
+        .auth-brand-copy{max-width:450px}
+        .auth-brand-copy h1{font-size:52px;line-height:1.08;letter-spacing:-2px;margin:0 0 17px}
+        .auth-brand-copy p{max-width:390px;color:#b2c4b5;font-size:16px}
+        .auth-shapes{display:flex;align-items:center;gap:12px;margin:36px 0}
+        .auth-shapes span{width:90px;height:90px;border-radius:50% 50% 15% 50%;background:#94b878}
+        .auth-shapes span:nth-child(2){background:#d5edb7;transform:rotate(180deg)}
+        .auth-shapes span:nth-child(3){background:#466f50;border-radius:50%}
+        .auth-brand-panel small{color:#b2c4b5}
+        .auth-main{padding:45px;display:flex;align-items:center;justify-content:center}
+        .auth-card{width:100%;max-width:440px;padding:36px;background:#fff;border:1px solid #e4e8df;border-radius:12px;box-shadow:0 12px 35px #172c2610}
+        .auth-card h1{font-size:30px;line-height:1.2;letter-spacing:-1px;margin:0 0 12px}
+        .auth-card h2{font-size:18px}
+        .auth-card p{color:#7c887b}
+        .auth-card form{display:grid;gap:15px;margin-top:24px}
+        .auth-card form p{display:grid;gap:7px;margin:0;color:#263b34;font-weight:600}
+        .auth-card label{font-size:13px}
+        .auth-card input,.auth-card select,.auth-card textarea{width:100%;padding:11px 12px;border:1px solid #dce2d7;border-radius:8px;background:#fff;color:#263b34}
+        .auth-card button,.auth-card form [type=submit]{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:10px 16px;border:0;border-radius:8px;background:#274a37;color:#fff;font-weight:600;text-decoration:none}
+        .auth-card button:hover,.auth-card form [type=submit]:hover{background:#345d44}
+        .auth-card ul{padding-left:20px}
+        .auth-messages{margin:0 0 18px;padding:12px 15px;border:1px solid #d9e2ce;border-radius:8px;background:#eaf0e0;color:#476a36}
+        .auth-menu{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px;padding:0;list-style:none}
+        .auth-menu a{font-size:12px;text-decoration:none}
+        .auth-menu a:hover{text-decoration:underline}
+        @media(max-width:760px){
+            .auth-page{grid-template-columns:1fr}
+            .auth-brand-panel{min-height:118px;padding:25px}
+            .auth-brand-copy,.auth-brand-panel>small{display:none}
+            .auth-main{padding:30px 20px}
+            .auth-card{padding:27px 22px}
+        }
+    </style>
+</head>
+<body>
+    {% block body %}
+    <div class="auth-page">
+        <aside class="auth-brand-panel">
+            <a class="auth-brand" href="/"><span class="auth-brand-mark">g</span>gather<span style="color:#b8d99d">.</span></a>
+            <div class="auth-brand-copy">
+                <div class="auth-shapes"><span></span><span></span><span></span></div>
+                <h1>Good relationships<br>start with a<br>conversation.</h1>
+                <p>A little more connection. A lot less busywork. Your contacts, calls, and calendar, together.</p>
+            </div>
+            <small>Made for meaningful connections.</small>
+        </aside>
+        <main class="auth-main">
+            <section class="auth-card">
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="auth-messages" role="status">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+                {% if user.is_authenticated %}
+                    <nav aria-label="{% trans 'Account menu' %}">
+                        <ul class="auth-menu">
+                            {% url 'account_email' as email_url_ %}{% if email_url_ %}<li><a href="{{ email_url_ }}">{% trans "Change Email" %}</a></li>{% endif %}
+                            {% url 'account_change_password' as change_password_url_ %}{% if change_password_url_ %}<li><a href="{{ change_password_url_ }}">{% trans "Change Password" %}</a></li>{% endif %}
+                            {% url 'socialaccount_connections' as connections_url_ %}{% if connections_url_ %}<li><a href="{{ connections_url_ }}">{% trans "Account Connections" %}</a></li>{% endif %}
+                            {% url 'mfa_index' as mfa_url_ %}{% if mfa_url_ %}<li><a href="{{ mfa_url_ }}">{% trans "Two-Factor Authentication" %}</a></li>{% endif %}
+                            {% url 'usersessions_list' as sessions_url_ %}{% if sessions_url_ %}<li><a href="{{ sessions_url_ }}">{% trans "Sessions" %}</a></li>{% endif %}
+                            {% url 'account_logout' as logout_url_ %}{% if logout_url_ %}<li><a href="{{ logout_url_ }}">{% trans "Sign Out" %}</a></li>{% endif %}
+                        </ul>
+                    </nav>
+                {% endif %}
+                {% block content %}{% endblock content %}
+            </section>
+        </main>
+    </div>
+    {% endblock body %}
+    {% block extra_body %}{% endblock extra_body %}
+</body>
+</html>
