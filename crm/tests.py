@@ -535,6 +535,27 @@ class ModelTests(TestCase):
 
 
 class OIDCSettingsTests(TestCase):
+    def test_authentication_templates_are_packaged_and_trigger_image_builds(self):
+        root = Path(__file__).resolve().parent.parent
+        self.assertIn("COPY templates/ templates/", (root / "Dockerfile").read_text())
+        workflow = (root / ".github" / "workflows" / "build-image.yml").read_text()
+        self.assertIn('- "templates/**"', workflow)
+
+    def test_oidc_login_confirmation_uses_styled_layout(self):
+        providers = self.providers()
+        providers[0].update(id="nublar", name="Nublar")
+        configured = configure_oidc(json.dumps(providers), debug=False)
+        with override_settings(SOCIALACCOUNT_PROVIDERS=configured, SECURE_SSL_REDIRECT=False):
+            response = self.client.get("/accounts/oidc/nublar/login/?next=/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "allauth/layouts/base.html")
+        self.assertContains(response, '<div class="auth-page">')
+        self.assertContains(response, '<section class="auth-card">')
+        self.assertContains(response, ".auth-card button")
+        self.assertContains(response, "Nublar")
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertContains(response, 'method="post"')
+
     def test_documented_docker_environment_names(self):
         env = os.environ.copy()
         env.update(

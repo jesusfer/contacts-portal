@@ -39,7 +39,8 @@ an authenticated, private endpoint.
 The **Build and publish Docker image** GitHub Actions workflow builds the Dockerfile on
 pushes to `main` that change `crm/`, `frontend/`, or `Dockerfile`. It also
 watches the remaining image inputs (`config/`, Python requirements, `manage.py`,
-the entrypoint, `.dockerignore`) and its own workflow definition.
+the entrypoint, `.dockerignore`, and authentication `templates/`) and its own
+workflow definition.
 Builds use GitHub Actions caching and publish commit-SHA image tags.
 
 Configure these repository settings under **Settings → Secrets and variables

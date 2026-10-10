@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 COPY manage.py ./
 COPY config/ config/
 COPY crm/ crm/
+COPY templates/ templates/
 COPY --from=frontend /build/frontend/dist/ frontend/dist/
 COPY docker-entrypoint.sh ./
 RUN mkdir -p data media staticfiles \
