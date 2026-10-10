@@ -40,7 +40,7 @@ def api(methods, *, agent_required=True):
                 if not request.user.is_authenticated:
                     return error("Authentication required.", 401)
                 try:
-                    request.agent = Agent.objects.select_related("company").get(user=request.user)
+                    request.agent = Agent.objects.get(user=request.user)
                 except Agent.DoesNotExist:
                     return error("Your account has not been provisioned with an agent.", 403)
             try:

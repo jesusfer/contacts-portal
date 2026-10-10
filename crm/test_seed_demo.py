@@ -29,7 +29,9 @@ class SeedDemoTests(TestCase):
         user.set_password("existing-test-passphrase")
         user.save()
         company = Company.objects.create(name="Operational employer")
-        return Agent.objects.create(user=user, company=company)
+        agent = Agent.objects.create(user=user)
+        agent.companies.add(company)
+        return agent
 
     def test_creates_valid_cross_company_dataset(self):
         now = timezone.now()
@@ -47,7 +49,7 @@ class SeedDemoTests(TestCase):
             "nora.ellis@example.com", "leo.mercer@example.com",
         })
         self.assertEqual(Contact.objects.values("company").distinct().count(), 2)
-        self.assertFalse(Contact.objects.filter(company=agent.company).exists())
+        self.assertFalse(Contact.objects.filter(company__in=agent.companies.all()).exists())
         self.assertEqual(set(agent.calls.values_list("status", flat=True)), set(Call.Status.values))
         completed = agent.calls.filter(status=Call.Status.COMPLETED)
         self.assertEqual(completed.count(), 3)
@@ -98,11 +100,11 @@ class SeedDemoTests(TestCase):
     def test_existing_empty_agent_preserves_company_password_and_flags(self):
         agent = self.existing_agent(is_active=False, is_staff=True, is_superuser=True)
         before_user = get_user_model().objects.values().get(pk=agent.user_id)
-        before_company = Company.objects.values().get(pk=agent.company_id)
+        before_companies = list(agent.companies.values().order_by("pk"))
         output = self.seed(username="existing")
         agent.refresh_from_db()
         self.assertEqual(get_user_model().objects.values().get(pk=agent.user_id), before_user)
-        self.assertEqual(Company.objects.values().get(pk=agent.company_id), before_company)
+        self.assertEqual(list(agent.companies.values().order_by("pk")), before_companies)
         self.assertEqual(agent.calls.count(), 9)
         self.assertFalse(Company.objects.filter(name="Demo Harbor Advisory").exists())
         self.assertNotIn("changepassword", output)
@@ -117,13 +119,13 @@ class SeedDemoTests(TestCase):
         before = get_user_model().objects.values().get(pk=user.pk)
         output = self.seed(username="existing")
         self.assertEqual(get_user_model().objects.values().get(pk=user.pk), before)
-        self.assertEqual(Agent.objects.get(user=user).company.name, "Demo Harbor Advisory")
+        self.assertIn("Demo Harbor Advisory", [company.name for company in Agent.objects.get(user=user).companies.all()])
         self.assertNotIn("changepassword", output)
 
     def test_existing_calls_or_emails_skip_without_any_mutations(self):
         agent = self.existing_agent(is_staff=True)
         contact = Contact.objects.create(
-            company=agent.company, name="Operational contact", email="operational@example.com",
+            company=agent.companies.first(), name="Operational contact", email="operational@example.com",
         )
         for model in (Call, Email):
             with self.subTest(activity=model.__name__):
@@ -141,7 +143,7 @@ class SeedDemoTests(TestCase):
     def test_shared_directory_reused_and_unrelated_activity_preserved(self):
         other_agent = self.existing_agent()
         contact = Contact.objects.create(
-            company=other_agent.company, name="Unrelated contact", email="unrelated@example.com",
+            company=other_agent.companies.first(), name="Unrelated contact", email="unrelated@example.com",
         )
         call = Call.objects.create(agent=other_agent, contact=contact)
         email = Email.objects.create(agent=other_agent, contact=contact, subject="Unrelated email")
@@ -171,7 +173,7 @@ class SeedDemoTests(TestCase):
     def test_late_validation_failure_rolls_back_entire_seed(self):
         agent = self.existing_agent()
         contact = Contact.objects.create(
-            company=agent.company, name="Existing contact", email="existing@example.com",
+            company=agent.companies.first(), name="Existing contact", email="existing@example.com",
         )
         call = Call.objects.create(agent=agent, contact=contact)
         start = timezone.now() + timedelta(days=1)
