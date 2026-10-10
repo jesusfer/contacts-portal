@@ -40,7 +40,7 @@ def api(methods, *, agent_required=True):
                 if not request.user.is_authenticated:
                     return error("Authentication required.", 401)
                 try:
-                    request.agent = Agent.objects.select_related("company").get(user=request.user)
+                    request.agent = Agent.objects.get(user=request.user)
                 except Agent.DoesNotExist:
                     return error("Your account has not been provisioned with an agent.", 403)
             try:
@@ -183,8 +183,12 @@ def session_json(request):
             "picture_url": picture_url(request.user),
         }
         try:
-            profile = Agent.objects.select_related("company").get(user=request.user)
-            agent = {"id": profile.pk, "company": company_json(profile.company)}
+            profile = Agent.objects.prefetch_related("companies").get(user=request.user)
+            companies = [company_json(company) for company in profile.companies.all()]
+            agent = {
+                "id": profile.pk,
+                "companies": companies,
+            }
         except Agent.DoesNotExist:
             pass
     providers = [

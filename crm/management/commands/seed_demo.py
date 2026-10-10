@@ -68,7 +68,8 @@ class Command(BaseCommand):
         if agent is None:
             employer, created = Company.objects.get_or_create(name="Demo Harbor Advisory")
             counts["companies"] += int(created)
-            agent = Agent.objects.create(user=user, company=employer)
+            agent = Agent.objects.create(user=user)
+            agent.companies.add(employer)
 
         contacts = []
         for company_name, people in (

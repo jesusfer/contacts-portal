@@ -40,9 +40,12 @@ class APITests(TestCase):
         cls.peer = get_user_model().objects.create_user("peer")
         cls.other_user = get_user_model().objects.create_user("other")
         cls.unprovisioned = get_user_model().objects.create_user("waiting")
-        cls.agent = Agent.objects.create(user=cls.user, company=cls.company)
-        cls.peer_agent = Agent.objects.create(user=cls.peer, company=cls.company)
-        cls.other_agent = Agent.objects.create(user=cls.other_user, company=cls.other_company)
+        cls.agent = Agent.objects.create(user=cls.user)
+        cls.peer_agent = Agent.objects.create(user=cls.peer)
+        cls.other_agent = Agent.objects.create(user=cls.other_user)
+        cls.agent.companies.add(cls.company)
+        cls.peer_agent.companies.add(cls.company)
+        cls.other_agent.companies.add(cls.other_company)
         cls.contact = Contact.objects.create(name="Alice", email="alice@example.com", company=cls.company)
         cls.other_contact = Contact.objects.create(
             name="Bob", email="bob@example.com", company=cls.other_company
@@ -82,7 +85,7 @@ class APITests(TestCase):
         self.assertIsNone(response.json()["user"])
         self.assertIn("csrftoken", response.cookies)
         response = self.client.get("/api/session/").json()
-        self.assertEqual(response["agent"]["company"], {"id": self.company.id, "name": "First"})
+        self.assertEqual(response["agent"]["companies"], [{"id": self.company.id, "name": "First"}])
         self.assertEqual(response["user"]["username"], "agent")
         self.client.force_login(self.unprovisioned)
         self.assertIsNone(self.client.get("/api/session/").json()["agent"])
@@ -167,7 +170,7 @@ class APITests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["name"], "Third")
         self.agent.refresh_from_db()
-        self.assertEqual(self.agent.company_id, self.company.id)
+        self.assertEqual(list(self.agent.companies.values_list("id", flat=True)), [self.company.id])
         self.assertEqual(self.send("post", "/api/companies/", {"name": ""}).status_code, 400)
         self.assertEqual(self.send(
             "post", "/api/companies/", {"name": "New", "agent_id": self.agent.id}
@@ -466,9 +469,8 @@ class ModelTests(TestCase):
     def setUpTestData(cls):
         cls.company = Company.objects.create(name="Company")
         cls.other_company = Company.objects.create(name="Other")
-        cls.agent = Agent.objects.create(
-            user=get_user_model().objects.create_user("agent"), company=cls.company
-        )
+        cls.agent = Agent.objects.create(user=get_user_model().objects.create_user("agent"))
+        cls.agent.companies.add(cls.company)
         cls.contact = Contact.objects.create(name="Contact", email="contact@example.com", company=cls.company)
 
     def test_rating_model_form_and_database_constraints(self):
@@ -524,10 +526,9 @@ class ModelTests(TestCase):
         self.contact.save()
         self.contact.refresh_from_db()
         self.assertEqual(self.contact.company, self.other_company)
-        self.agent.company = self.other_company
-        self.agent.save()
+        self.agent.companies.set([self.other_company])
         self.agent.refresh_from_db()
-        self.assertEqual(self.agent.company, self.other_company)
+        self.assertEqual(list(self.agent.companies.values_list("id", flat=True)), [self.other_company.id])
 
     def test_full_domain_and_social_accounts_registered_in_admin(self):
         for model in (Company, Contact, Agent, Call, Appointment, Email, SocialAccount):

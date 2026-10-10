@@ -50,7 +50,7 @@ class Contact(ValidatedModel):
 
 class Agent(ValidatedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agent")
-    company = models.ForeignKey(Company, on_delete=models.PROTECT, related_name="agents")
+    companies = models.ManyToManyField(Company, related_name="agents")
 
     def __str__(self):
         return self.user.get_username()
