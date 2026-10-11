@@ -160,6 +160,7 @@ TEAMS_ENABLED = any(
     app["settings"].get("teams")
     for app in SOCIALACCOUNT_PROVIDERS["openid_connect"]["APPS"]
 )
+TEAMS_GRAPH_ONLY = os.environ.get("TEAMS_GRAPH_ONLY", "true").lower() in {"1", "true", "yes"}
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",

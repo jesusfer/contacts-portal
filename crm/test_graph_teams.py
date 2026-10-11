@@ -30,6 +30,68 @@ from .teams import GraphTokenManager, TeamsTokenError, validate_teams_token
 
 
 class TeamsGraphFrontendTests(SimpleTestCase):
+    def test_sdk_identity_binding_and_teams_auth_endpoint_selection(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required for frontend validation.")
+        source = Path(__file__).resolve().parent.parent / "frontend/src"
+        result = subprocess.run(
+            [node, "--input-type=module", "-e", f"""
+import assert from 'node:assert/strict'
+import {{ readFileSync }} from 'node:fs'
+globalThis.window = {{ location: {{ origin: 'https://portal.example.com' }} }}
+globalThis.document = {{ cookie: 'csrftoken=csrf-test' }}
+let account = {{ tenantId: 'tenant' }}
+let graphId = 'object'
+class App {{
+  constructor() {{
+    this.msalInstance = {{
+      acquireTokenSilent: async () => ({{ account }}),
+      setActiveAccount: value => {{ assert.equal(value, account) }},
+    }}
+    this.graph = {{ call: async () => ({{ id: graphId }}) }}
+  }}
+  async start() {{}}
+}}
+globalThis.sdkMock = {{ App }}
+globalThis.meMock = {{ get: {{}} }}
+const code = readFileSync({json.dumps(str(source / 'teams-graph.js'))}, 'utf8')
+  .replace("import('@microsoft/teams.client')", 'Promise.resolve(globalThis.sdkMock)')
+  .replace("import('@microsoft/teams.graph-endpoints/me')", 'Promise.resolve(globalThis.meMock)')
+const graph = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))
+const provider = {{ client_id: 'client', tenant_id: 'tenant' }}
+await graph.startTeamsGraph(provider, 'object')
+assert.equal(graph.teamsGraphActive(), true)
+account = {{ tenantId: 'other-tenant' }}
+await assert.rejects(graph.startTeamsGraph(provider, 'object'), /tenant does not match/)
+assert.equal(graph.teamsGraphActive(), false)
+account = {{ tenantId: 'tenant' }}
+graphId = 'other-object'
+await assert.rejects(graph.startTeamsGraph(provider, 'object'), /identity does not match/)
+assert.equal(graph.teamsGraphActive(), false)
+graphId = 'object'
+const controller = new AbortController()
+controller.abort()
+await assert.rejects(graph.startTeamsGraph(provider, 'object', controller.signal))
+assert.equal(graph.teamsGraphActive(), false)
+const teams = await import({json.dumps((source / 'teams.js').as_uri())})
+let requests = []
+globalThis.fetch = async (url, options) => {{
+  requests.push({{ url, options }})
+  return {{ ok: true, json: async () => ({{ id: 'object', tenant_id: 'tenant' }}) }}
+}}
+await teams.exchangeTeamsToken('work', 'portal-token', {{ graphOnly: true }})
+await teams.exchangeTeamsToken('work', 'portal-token')
+assert.deepEqual(requests.map(r => r.url), ['/api/teams/identity/', '/api/teams/sso/'])
+for (const {{ options }} of requests) {{
+  assert.equal(options.headers['X-CSRFToken'], 'csrf-test')
+  assert.deepEqual(JSON.parse(options.body), {{ provider_id: 'work', token: 'portal-token' }})
+}}
+"""],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_sdk_pagination_restricts_destinations_and_preserves_query(self):
         node = shutil.which("node")
         if not node:
@@ -821,13 +883,98 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
 
     def test_teams_config_is_public_and_name_based_without_secrets(self):
         result = self.client.get("/api/teams/config/")
-        self.assertEqual(result.json(), {"providers": [{
+        self.assertEqual(result.json(), {"graph_only": True, "providers": [{
             "id": "work", "provider_id": "work", "name": "entraid-work", "client_id": CLIENT,
             "resource": f"api://portal.example.com/{CLIENT}",
             "tenant_id": TENANT,
         }]})
         self.assertNotIn("fixture", str(result.json()))
         self.assertIn("csrftoken", result.cookies)
+
+    @override_settings(TEAMS_GRAPH_ONLY=False)
+    def test_teams_config_can_select_legacy_startup(self):
+        self.assertFalse(self.client.get("/api/teams/config/").json()["graph_only"])
+
+    @patch("crm.teams._get_jwks")
+    @patch("crm.views.exchange_graph_token")
+    @patch("crm.views.GraphClient")
+    def test_identity_verification_needs_no_portal_account_or_obo(self, graph, exchange, keys):
+        keys.return_value = self.jwks
+        SocialAccount.objects.all().delete()
+        result = self.client.post(
+            "/api/teams/identity/", {"provider_id": "work", "token": self.token()},
+            content_type="application/json",
+        )
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json(), {"id": OID, "tenant_id": TENANT})
+        self.assertIn("no-store", result["Cache-Control"])
+        exchange.assert_not_called()
+        graph.assert_not_called()
+        for key in ("_auth_user_id", "graph_tokens", AUTH_SOURCE_SESSION_KEY, "crm_teams_authenticated"):
+            self.assertNotIn(key, self.client.session)
+        self.assertEqual(self.client.get("/api/contacts/").status_code, 401)
+
+    @patch("crm.teams._get_jwks")
+    def test_identity_verification_preserves_existing_browser_session(self, keys):
+        keys.return_value = self.jwks
+        self.graph_login()
+        before = dict(self.client.session)
+        result = self.client.post(
+            "/api/teams/identity/", {"provider_id": "work", "token": self.token()},
+            content_type="application/json",
+        )
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(dict(self.client.session), before)
+
+    @patch("crm.teams._get_jwks")
+    def test_identity_verification_requires_csrf_and_valid_claims(self, keys):
+        keys.return_value = self.jwks
+        client = Client(enforce_csrf_checks=True)
+        config = client.get("/api/teams/config/")
+        data = {"provider_id": "work", "token": self.token()}
+        self.assertEqual(client.post(
+            "/api/teams/identity/", data, content_type="application/json",
+        ).status_code, 403)
+        headers = {"HTTP_X_CSRFTOKEN": config.cookies["csrftoken"].value}
+        self.assertEqual(client.post(
+            "/api/teams/identity/", data, content_type="application/json", **headers,
+        ).status_code, 200)
+        for claim, value in (("aud", "wrong"), ("tid", CLIENT), ("scp", "User.Read"), ("exp", 1)):
+            with self.subTest(claim=claim):
+                result = client.post(
+                    "/api/teams/identity/",
+                    {"provider_id": "work", "token": self.token({**self.claims(), claim: value})},
+                    content_type="application/json", **headers,
+                )
+                self.assertEqual(result.status_code, 403)
+                self.assertIn("no-store", result["Cache-Control"])
+
+    @patch("crm.views.ratelimit.consume", return_value=False)
+    @patch("crm.teams._get_jwks")
+    def test_identity_verification_is_rate_limited(self, keys, consume):
+        result = self.client.post(
+            "/api/teams/identity/", {"provider_id": "work", "token": self.token()},
+            content_type="application/json",
+        )
+        self.assertEqual(result.status_code, 429)
+        keys.assert_not_called()
+
+    @patch("crm.teams._get_jwks")
+    def test_identity_verification_binds_multitenant_issuer_to_signed_tenant(self, keys):
+        keys.return_value = self.jwks
+        providers = configure_oidc(json.dumps([{
+            "id": "work", "name": "entraid-work",
+            "server_url": "https://login.microsoftonline.com/organizations/v2.0",
+            "client_id": CLIENT, "client_secret": "fixture",
+            "teams": {"resource": f"api://portal.example.com/{CLIENT}"},
+        }]), debug=False)
+        with override_settings(SOCIALACCOUNT_PROVIDERS=providers):
+            result = self.client.post(
+                "/api/teams/identity/", {"provider_id": "work", "token": self.token()},
+                content_type="application/json",
+            )
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json(), {"id": OID, "tenant_id": TENANT})
 
     @patch("crm.teams._get_jwks")
     @patch("crm.teams.requests.post")
@@ -850,6 +997,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         )
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json()["user"]["id"], self.user.pk)
+        self.assertEqual(result.json()["teams_identity"], {"id": OID, "tenant_id": TENANT})
 
     @patch("crm.teams._get_jwks")
     @patch("crm.teams.requests.post")
@@ -863,3 +1011,18 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 self.assertEqual(result.status_code, 400)
         keys.assert_not_called()
         post.assert_not_called()
+
+    @patch("crm.teams._get_jwks")
+    def test_identity_rejects_short_or_oversized_input_and_unknown_provider(self, keys):
+        for token in ("", "x" * 255, "x" * 16385, "x" * 32769):
+            result = self.client.post(
+                "/api/teams/identity/", {"provider_id": "work", "token": token},
+                content_type="application/json",
+            )
+            self.assertEqual(result.status_code, 400)
+        result = self.client.post(
+            "/api/teams/identity/", {"provider_id": "missing", "token": self.token()},
+            content_type="application/json",
+        )
+        self.assertEqual(result.status_code, 404)
+        keys.assert_not_called()

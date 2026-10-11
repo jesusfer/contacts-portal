@@ -24,12 +24,18 @@ export async function startTeamsGraph(provider, expectedId, signal) {
   })
   await app.start()
   signal?.throwIfAborted()
-  if (!await app.hasConsentForScopes(scopes)) {
-    const result = await app.msalInstance.acquireTokenPopup({ scopes })
-    app.msalInstance.setActiveAccount(result.account)
+  let result
+  try {
+    result = await app.msalInstance.acquireTokenSilent({ scopes })
+  } catch {
+    result = await app.msalInstance.acquireTokenPopup({ scopes })
   }
+  if (result.account?.tenantId !== provider.tenant_id) {
+    throw new Error('Microsoft Graph tenant does not match the Teams identity.')
+  }
+  app.msalInstance.setActiveAccount(result.account)
   const profile = await app.graph.call(me.get, { $select: ['id'] })
-  if (!expectedId || profile.id !== expectedId) throw new Error('Microsoft Graph identity does not match the portal session.')
+  if (!expectedId || profile.id !== expectedId) throw new Error('Microsoft Graph identity does not match the Teams identity.')
   signal?.throwIfAborted()
   client = { app, me }
 }

@@ -66,7 +66,7 @@ def api(methods, *, agent_required=True):
         @wraps(view)
         def wrapped(request, *args, **kwargs):
             response = dispatch(request, *args, **kwargs)
-            if request.path.startswith("/api/graph/") or (
+            if request.path.startswith(("/api/graph/", "/api/teams/")) or (
                 request.path in {"/api/profile/", "/api/session/", "/api/teams/sso/"}
                 and graph_enabled(request)
             ):
@@ -620,7 +620,7 @@ def graph_presence(request):
 @api(["GET"], agent_required=False)
 def teams_config(request):
     providers = settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
-    return JsonResponse({"providers": [{
+    return JsonResponse({"graph_only": settings.TEAMS_GRAPH_ONLY, "providers": [{
         "id": app["provider_id"], "provider_id": app["provider_id"], "name": app["name"],
         "client_id": app["client_id"], "resource": app["settings"]["teams"]["resource"],
         "tenant_id": app["settings"]["teams"]["tenant_id"],
@@ -629,6 +629,15 @@ def teams_config(request):
 
 @api(["POST"], agent_required=False)
 def teams_sso(request):
+    return _teams_auth(request)
+
+
+@api(["POST"], agent_required=False)
+def teams_identity(request):
+    return _teams_auth(request, graph_only=True)
+
+
+def _teams_auth(request, *, graph_only=False):
     if len(request.body) > 32768:
         return error("Teams SSO request is too large.", 400)
     data = payload(request, {"provider_id": TEXT, "token": TEXT}, required=("provider_id", "token"))
@@ -645,8 +654,10 @@ def teams_sso(request):
     try:
         config = load_teams_config(app["settings"])
         claims = validate_teams_token(data["token"], config)
-        account = get_teams_account(provider_id, claims)
         tenant = provider_tenant(app, claims["tid"])
+        if graph_only:
+            return JsonResponse({"id": claims["oid"], "tenant_id": tenant})
+        account = get_teams_account(provider_id, claims)
         token = exchange_graph_token(app, assertion=data["token"], tenant_id=tenant)
         profile_data = GraphClient(token["access_token"], tenant).get_profile()
         if profile_data.get("id") != claims["oid"]:
@@ -659,7 +670,10 @@ def teams_sso(request):
         )
         request.session["crm_teams_authenticated"] = True
         graph_profile_json(request, profile_data)
-        return JsonResponse(session_json(request))
+        return JsonResponse({
+            **session_json(request),
+            "teams_identity": {"id": claims["oid"], "tenant_id": tenant},
+        })
     except TeamsTokenError as exc:
         return error(exc.public_message, 403)
     except TeamsConfigError:

@@ -12,6 +12,7 @@ services:
       DJANGO_SECURE_SSL_REDIRECT: "${DJANGO_SECURE_SSL_REDIRECT:-0}"
       DJANGO_TRUST_PROXY: "${DJANGO_TRUST_PROXY:-0}"
       OIDC_PROVIDERS: "${OIDC_PROVIDERS:-[]}"
+      TEAMS_GRAPH_ONLY: "${TEAMS_GRAPH_ONLY:-1}"
       SQLITE_PATH: /app/data/db.sqlite3
       MEDIA_ROOT: /app/media
     volumes:
