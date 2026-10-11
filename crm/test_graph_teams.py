@@ -80,12 +80,12 @@ globalThis.fetch = async (url, options) => {{
   requests.push({{ url, options }})
   return {{ ok: true, json: async () => ({{ id: 'object', tenant_id: 'tenant' }}) }}
 }}
-await teams.exchangeTeamsToken('work', 'portal-token', {{ graphOnly: true }})
-await teams.exchangeTeamsToken('work', 'portal-token')
+await teams.exchangeTeamsToken('entraid-work', 'portal-token', {{ graphOnly: true }})
+await teams.exchangeTeamsToken('entraid-work', 'portal-token')
 assert.deepEqual(requests.map(r => r.url), ['/api/teams/identity/', '/api/teams/sso/'])
 for (const {{ options }} of requests) {{
   assert.equal(options.headers['X-CSRFToken'], 'csrf-test')
-  assert.deepEqual(JSON.parse(options.body), {{ provider_id: 'work', token: 'portal-token' }})
+  assert.deepEqual(JSON.parse(options.body), {{ provider_id: 'entraid-work', token: 'portal-token' }})
 }}
 """],
             capture_output=True, text=True, check=False,
@@ -129,12 +129,12 @@ CLIENT = "11111111-1111-1111-1111-111111111111"
 OID = "33333333-3333-3333-3333-333333333333"
 AZP = "1fec8e78-bce4-4aaf-ab1b-5451cc387264"
 PROVIDERS = configure_oidc(json.dumps([{
-    "id": "work", "name": "entraid-work",
+    "id": "entraid-work", "name": "Work identity",
     "server_url": f"https://login.microsoftonline.com/{TENANT}/v2.0",
     "client_id": CLIENT, "client_secret": "fixture",
     "teams": {"resource": f"api://portal.example.com/{CLIENT}"},
 }, {
-    "id": "entraid-other", "name": "Other",
+    "id": "other", "name": "Other",
     "server_url": "https://identity.example.com",
     "client_id": "other", "client_secret": "fixture",
 }]), debug=False)
@@ -392,9 +392,9 @@ class GraphClientTests(SimpleTestCase):
                 self.graph.get_mailbox_messages(page=bad)
         get.assert_not_called()
         for graph in (
-            GraphClient("x", TENANT, user_id=8, provider_id="work"),
+            GraphClient("x", TENANT, user_id=8, provider_id="entraid-work"),
             GraphClient("x", TENANT, user_id=7, provider_id="other"),
-            GraphClient("x", "other-tenant", user_id=7, provider_id="work"),
+            GraphClient("x", "other-tenant", user_id=7, provider_id="entraid-work"),
         ):
             with self.assertRaises(InvalidCursor):
                 graph.get_mailbox_messages(page=page)
@@ -483,14 +483,14 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         )
         cls.first = get_user_model().objects.create_user("unrelated")
         SocialAccount.objects.create(
-            user=cls.first, provider="work", uid="first-sub",
+            user=cls.first, provider="entraid-work", uid="first-sub",
             extra_data={"id_token": {"oid": "another-object", "tid": TENANT}},
         )
         cls.account = SocialAccount.objects.create(
-            user=cls.user, provider="work", uid="oidc-sub",
+            user=cls.user, provider="entraid-work", uid="oidc-sub",
             extra_data={"id_token": {"oid": OID, "tid": TENANT, "sub": "oidc-sub"}},
         )
-        SocialAccount.objects.create(user=cls.user, provider="entraid-other", uid="oidc-sub")
+        SocialAccount.objects.create(user=cls.user, provider="other", uid="oidc-sub")
 
     def setUp(self):
         cache.clear()
@@ -500,22 +500,22 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         session = self.client.session
         request = SimpleNamespace(session=session)
         GraphTokenManager.store_token(
-            request, "work", "session-access", refresh_token, expires_in,
+            request, "entraid-work", "session-access", refresh_token, expires_in,
             TENANT, oid=OID,
         )
-        session[AUTH_SOURCE_SESSION_KEY] = "work"
+        session[AUTH_SOURCE_SESSION_KEY] = "entraid-work"
         session.save()
 
     def sso(self, token=None):
         return self.client.post(
-            "/api/teams/sso/", {"provider_id": "work", "token": token or self.token()},
+            "/api/teams/sso/", {"provider_id": "entraid-work", "token": token or self.token()},
             content_type="application/json",
         )
 
     @patch("crm.graph.requests.get")
     def test_normal_allauth_login_captures_real_socialtoken_by_provider_name(self, get):
-        self.assertEqual(self.client.get("/test/oidc/work/login/").status_code, 302)
-        tokens = self.client.session["graph_tokens"]["work"]
+        self.assertEqual(self.client.get("/test/oidc/entraid-work/login/").status_code, 302)
+        tokens = self.client.session["graph_tokens"]["entraid-work"]
         self.assertEqual(tokens["access_token"], "normal-access")
         self.assertEqual(tokens["refresh_token"], "normal-refresh")
         self.assertEqual(tokens["tenant_id"], TENANT)
@@ -533,7 +533,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertNotIn("refresh_token", str(self.account.extra_data))
 
     def test_token_capture_preserves_exact_expiry(self):
-        provider = get_adapter().get_provider(None, "work")
+        provider = get_adapter().get_provider(None, "entraid-work")
         expiry = timezone.now() + timedelta(minutes=17)
         sociallogin = provider.sociallogin_from_response(None, {"id_token": {
             "sub": "oidc-sub", "oid": OID, "tid": TENANT,
@@ -545,11 +545,11 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         allauth_user_logged_in.send(
             sender=get_user_model(), request=request, user=self.user, sociallogin=sociallogin,
         )
-        self.assertEqual(request.session["graph_tokens"]["work"]["expires_at"], expiry.isoformat())
-        self.assertEqual(request.session["graph_tokens"]["work"]["access_token"], "real-token")
+        self.assertEqual(request.session["graph_tokens"]["entraid-work"]["expires_at"], expiry.isoformat())
+        self.assertEqual(request.session["graph_tokens"]["entraid-work"]["access_token"], "real-token")
 
     def test_provider_id_prefix_does_not_enable_other_named_provider(self):
-        self.client.get("/test/oidc/entraid-other/login/")
+        self.client.get("/test/oidc/other/login/")
         self.assertNotIn("graph_tokens", self.client.session)
         self.assertNotIn("graph_enabled", self.client.session)
 
@@ -562,16 +562,16 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertNotIn("graph_tokens", self.client.session)
         self.assertEqual(result.json()["user"]["auth_source"], "Local")
         self.graph_login()
-        self.client.get("/test/oidc/entraid-other/login/")
+        self.client.get("/test/oidc/other/login/")
         self.assertNotIn("graph_tokens", self.client.session)
-        self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "entraid-other")
+        self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "other")
 
     def test_account_connect_does_not_replace_current_tokens_or_source(self):
         self.graph_login()
         before = dict(self.client.session)
-        self.assertEqual(self.client.get("/test/oidc/entraid-other/connect/").status_code, 302)
+        self.assertEqual(self.client.get("/test/oidc/other/connect/").status_code, 302)
         self.assertEqual(self.client.session["graph_tokens"], before["graph_tokens"])
-        self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "work")
+        self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "entraid-work")
 
     def test_logout_clears_graph_credentials_and_flags(self):
         self.graph_login()
@@ -670,7 +670,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def test_graph_client_only_uses_current_auth_provider(self):
         self.graph_login()
         session = self.client.session
-        session[AUTH_SOURCE_SESSION_KEY] = "entraid-other"
+        session[AUTH_SOURCE_SESSION_KEY] = "other"
         session.save()
         with patch("crm.graph.requests.get") as get:
             self.assertEqual(self.client.get("/api/graph/inbox/").status_code, 403)
@@ -725,7 +725,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             "token_type": "Bearer", "expires_in": 3600,
         })
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 200)
-        tokens = self.client.session["graph_tokens"]["work"]
+        tokens = self.client.session["graph_tokens"]["entraid-work"]
         self.assertEqual(tokens["access_token"], "renewed-access")
         self.assertEqual(tokens["refresh_token"], "renewed-refresh")
         self.assertEqual(post.call_args.args[0],
@@ -747,7 +747,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             "access_token": "renewed-access", "token_type": "Bearer", "expires_in": 3600,
         })
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 200)
-        self.assertEqual(self.client.session["graph_tokens"]["work"]["refresh_token"], "session-refresh")
+        self.assertEqual(self.client.session["graph_tokens"]["entraid-work"]["refresh_token"], "session-refresh")
 
     @patch("crm.teams.requests.post")
     def test_expired_without_refresh_and_tenant_mismatch_never_exchange(self, post):
@@ -755,7 +755,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
         self.graph_login()
         session = self.client.session
-        session["graph_tokens"]["work"]["tenant_id"] = "other-tenant"
+        session["graph_tokens"]["entraid-work"]["tenant_id"] = "other-tenant"
         session.save()
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
         post.assert_not_called()
@@ -797,9 +797,9 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(result.status_code, 200, result.content)
         self.assertEqual(result.json()["user"]["id"], self.user.pk)
         self.assertEqual(result.json()["user"]["name"], "Graph Name")
-        self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "work")
+        self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "entraid-work")
         self.assertTrue(self.client.session["crm_teams_authenticated"])
-        self.assertEqual(self.client.session["graph_tokens"]["work"]["access_token"], "obo-access")
+        self.assertEqual(self.client.session["graph_tokens"]["entraid-work"]["access_token"], "obo-access")
         data = post.call_args.kwargs["data"]
         self.assertEqual(data["assertion"], token)
         self.assertEqual(data["requested_token_use"], "on_behalf_of")
@@ -875,7 +875,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def test_duplicate_linked_identity_is_rejected_without_obo(self, post, keys):
         keys.return_value = self.jwks
         SocialAccount.objects.create(
-            user=self.first, provider="work", uid="duplicate-sub",
+            user=self.first, provider="entraid-work", uid="duplicate-sub",
             extra_data={"oid": OID, "tid": TENANT},
         )
         self.assertEqual(self.sso().status_code, 403)
@@ -884,7 +884,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def test_teams_config_is_public_and_name_based_without_secrets(self):
         result = self.client.get("/api/teams/config/")
         self.assertEqual(result.json(), {"graph_only": True, "providers": [{
-            "id": "work", "provider_id": "work", "name": "entraid-work", "client_id": CLIENT,
+            "id": "entraid-work", "provider_id": "entraid-work", "name": "Work identity", "client_id": CLIENT,
             "resource": f"api://portal.example.com/{CLIENT}",
             "tenant_id": TENANT,
         }]})
@@ -902,7 +902,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         keys.return_value = self.jwks
         SocialAccount.objects.all().delete()
         result = self.client.post(
-            "/api/teams/identity/", {"provider_id": "work", "token": self.token()},
+            "/api/teams/identity/", {"provider_id": "entraid-work", "token": self.token()},
             content_type="application/json",
         )
         self.assertEqual(result.status_code, 200)
@@ -920,7 +920,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.graph_login()
         before = dict(self.client.session)
         result = self.client.post(
-            "/api/teams/identity/", {"provider_id": "work", "token": self.token()},
+            "/api/teams/identity/", {"provider_id": "entraid-work", "token": self.token()},
             content_type="application/json",
         )
         self.assertEqual(result.status_code, 200)
@@ -931,7 +931,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         keys.return_value = self.jwks
         client = Client(enforce_csrf_checks=True)
         config = client.get("/api/teams/config/")
-        data = {"provider_id": "work", "token": self.token()}
+        data = {"provider_id": "entraid-work", "token": self.token()}
         self.assertEqual(client.post(
             "/api/teams/identity/", data, content_type="application/json",
         ).status_code, 403)
@@ -943,7 +943,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             with self.subTest(claim=claim):
                 result = client.post(
                     "/api/teams/identity/",
-                    {"provider_id": "work", "token": self.token({**self.claims(), claim: value})},
+                    {"provider_id": "entraid-work", "token": self.token({**self.claims(), claim: value})},
                     content_type="application/json", **headers,
                 )
                 self.assertEqual(result.status_code, 403)
@@ -953,7 +953,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     @patch("crm.teams._get_jwks")
     def test_identity_verification_is_rate_limited(self, keys, consume):
         result = self.client.post(
-            "/api/teams/identity/", {"provider_id": "work", "token": self.token()},
+            "/api/teams/identity/", {"provider_id": "entraid-work", "token": self.token()},
             content_type="application/json",
         )
         self.assertEqual(result.status_code, 429)
@@ -963,14 +963,14 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def test_identity_verification_binds_multitenant_issuer_to_signed_tenant(self, keys):
         keys.return_value = self.jwks
         providers = configure_oidc(json.dumps([{
-            "id": "work", "name": "entraid-work",
+            "id": "entraid-work", "name": "entraid-work",
             "server_url": "https://login.microsoftonline.com/organizations/v2.0",
             "client_id": CLIENT, "client_secret": "fixture",
             "teams": {"resource": f"api://portal.example.com/{CLIENT}"},
         }]), debug=False)
         with override_settings(SOCIALACCOUNT_PROVIDERS=providers):
             result = self.client.post(
-                "/api/teams/identity/", {"provider_id": "work", "token": self.token()},
+                "/api/teams/identity/", {"provider_id": "entraid-work", "token": self.token()},
                 content_type="application/json",
             )
         self.assertEqual(result.status_code, 200)
@@ -987,7 +987,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         })
         client = Client(enforce_csrf_checks=True)
         config = client.get("/api/teams/config/")
-        data = {"provider_id": "work", "token": self.token()}
+        data = {"provider_id": "entraid-work", "token": self.token()}
         self.assertEqual(client.post(
             "/api/teams/sso/", data, content_type="application/json",
         ).status_code, 403)
@@ -1005,7 +1005,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         for token in ("", "x" * 255, "x" * 16385, "x" * 32769):
             with self.subTest(length=len(token)):
                 result = self.client.post(
-                    "/api/teams/sso/", {"provider_id": "work", "token": token},
+                    "/api/teams/sso/", {"provider_id": "entraid-work", "token": token},
                     content_type="application/json",
                 )
                 self.assertEqual(result.status_code, 400)
@@ -1016,7 +1016,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def test_identity_rejects_short_or_oversized_input_and_unknown_provider(self, keys):
         for token in ("", "x" * 255, "x" * 16385, "x" * 32769):
             result = self.client.post(
-                "/api/teams/identity/", {"provider_id": "work", "token": token},
+                "/api/teams/identity/", {"provider_id": "entraid-work", "token": token},
                 content_type="application/json",
             )
             self.assertEqual(result.status_code, 400)

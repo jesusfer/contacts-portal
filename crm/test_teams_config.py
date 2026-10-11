@@ -11,7 +11,7 @@ from .middleware import TeamsFrameMiddleware
 class TeamsConfigurationTests(SimpleTestCase):
     def provider(self, **changes):
         data = {
-            "id": "work", "name": "entraid-work",
+            "id": "entraid-work", "name": "Work identity",
             "client_id": "11111111-1111-1111-1111-111111111111",
             "client_secret": "fixture",
             "server_url": "https://login.microsoftonline.com/22222222-2222-2222-2222-222222222222/v2.0",
@@ -43,11 +43,11 @@ class TeamsConfigurationTests(SimpleTestCase):
         self.assertEqual(app["settings"]["graph_tenant_id"], "organizations")
         self.assertEqual(app["settings"]["teams"]["tenant_id"], "organizations")
 
-    def test_graph_selection_uses_name_not_identifier(self):
-        app = self.configure(self.provider(id="corporate", name="ENTRAID-corporate"))
+    def test_graph_selection_uses_provider_id_prefix(self):
+        app = self.configure(self.provider(id="entraid-corporate", name="Corporate"))
         self.assertEqual(app["settings"]["scope"], GRAPH_SCOPES)
         ordinary = self.configure(self.provider(
-            id="entraid-work", name="Other", server_url="https://identity.example.com",
+            id="work", name="ENTRAID-work", server_url="https://identity.example.com",
         ))
         self.assertNotIn("scope", ordinary["settings"])
 
@@ -79,10 +79,10 @@ class TeamsConfigurationTests(SimpleTestCase):
             self.configure(self.provider(scope=["openid"]))
 
     def test_other_oidc_providers_keep_existing_behavior(self):
-        app = self.configure(self.provider(name="Other", server_url="https://identity.example.com"))
+        app = self.configure(self.provider(id="work", name="Other", server_url="https://identity.example.com"))
         self.assertEqual(app["settings"], {"server_url": "https://identity.example.com"})
         with self.assertRaises(ImproperlyConfigured):
-            self.configure(self.provider(name="Other", teams={}))
+            self.configure(self.provider(id="work", name="Other", teams={}))
 
 
 @override_settings(TEAMS_ENABLED=True)
