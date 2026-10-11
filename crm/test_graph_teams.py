@@ -134,7 +134,7 @@ PROVIDERS = configure_oidc(json.dumps([{
     "client_id": CLIENT, "client_secret": "fixture",
     "teams": {"resource": f"api://portal.example.com/{CLIENT}"},
 }, {
-    "id": "entraid-other", "name": "Other",
+    "id": "other", "name": "Other",
     "server_url": "https://identity.example.com",
     "client_id": "other", "client_secret": "fixture",
 }]), debug=False)
@@ -490,7 +490,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             user=cls.user, provider="entraid-work", uid="oidc-sub",
             extra_data={"id_token": {"oid": OID, "tid": TENANT, "sub": "oidc-sub"}},
         )
-        SocialAccount.objects.create(user=cls.user, provider="entraid-other", uid="oidc-sub")
+        SocialAccount.objects.create(user=cls.user, provider="other", uid="oidc-sub")
 
     def setUp(self):
         cache.clear()
@@ -549,7 +549,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(request.session["graph_tokens"]["entraid-work"]["access_token"], "real-token")
 
     def test_provider_id_prefix_does_not_enable_other_named_provider(self):
-        self.client.get("/test/oidc/entraid-other/login/")
+        self.client.get("/test/oidc/other/login/")
         self.assertNotIn("graph_tokens", self.client.session)
         self.assertNotIn("graph_enabled", self.client.session)
 
@@ -562,14 +562,14 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertNotIn("graph_tokens", self.client.session)
         self.assertEqual(result.json()["user"]["auth_source"], "Local")
         self.graph_login()
-        self.client.get("/test/oidc/entraid-other/login/")
+        self.client.get("/test/oidc/other/login/")
         self.assertNotIn("graph_tokens", self.client.session)
-        self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "entraid-other")
+        self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "other")
 
     def test_account_connect_does_not_replace_current_tokens_or_source(self):
         self.graph_login()
         before = dict(self.client.session)
-        self.assertEqual(self.client.get("/test/oidc/entraid-other/connect/").status_code, 302)
+        self.assertEqual(self.client.get("/test/oidc/other/connect/").status_code, 302)
         self.assertEqual(self.client.session["graph_tokens"], before["graph_tokens"])
         self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "entraid-work")
 
@@ -670,7 +670,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def test_graph_client_only_uses_current_auth_provider(self):
         self.graph_login()
         session = self.client.session
-        session[AUTH_SOURCE_SESSION_KEY] = "entraid-other"
+        session[AUTH_SOURCE_SESSION_KEY] = "other"
         session.save()
         with patch("crm.graph.requests.get") as get:
             self.assertEqual(self.client.get("/api/graph/inbox/").status_code, 403)
@@ -884,7 +884,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def test_teams_config_is_public_and_name_based_without_secrets(self):
         result = self.client.get("/api/teams/config/")
         self.assertEqual(result.json(), {"graph_only": True, "providers": [{
-            "id": "entraid-work", "provider_id": "entraid-work", "name": "entraid-work", "client_id": CLIENT,
+            "id": "entraid-work", "provider_id": "entraid-work", "name": "Work identity", "client_id": CLIENT,
             "resource": f"api://portal.example.com/{CLIENT}",
             "tenant_id": TENANT,
         }]})
