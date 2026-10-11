@@ -623,6 +623,7 @@ def teams_config(request):
     return JsonResponse({"providers": [{
         "id": app["provider_id"], "provider_id": app["provider_id"], "name": app["name"],
         "client_id": app["client_id"], "resource": app["settings"]["teams"]["resource"],
+        "tenant_id": app["settings"]["teams"]["tenant_id"],
     } for app in providers if graph_provider(app["provider_id"]) and app["settings"].get("teams")]})
 
 

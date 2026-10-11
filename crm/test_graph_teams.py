@@ -1,5 +1,8 @@
 import json
+import shutil
+import subprocess
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -24,6 +27,39 @@ from .signals import AUTH_SOURCE_SESSION_KEY
 from .models import UserProfile
 from .openid_connect import TenantAwareOpenIDConnectOAuth2Adapter
 from .teams import GraphTokenManager, TeamsTokenError, validate_teams_token
+
+
+class TeamsGraphFrontendTests(SimpleTestCase):
+    def test_sdk_pagination_restricts_destinations_and_preserves_query(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required for frontend validation.")
+        module = (Path(__file__).resolve().parent.parent / "frontend/src/teams-graph.js").as_uri()
+        result = subprocess.run(
+            [node, "--input-type=module", "-e", f"""
+import assert from 'node:assert/strict'
+import {{ graphPageQuery, clearTeamsGraph, teamsGraphActive, teamsGraphRequest }} from {json.dumps(module)}
+const endpoint = '/me/calendarView'
+const params = {{ startDateTime: '2026-10-01T00:00:00Z', $top: '50' }}
+const link = 'https://graph.microsoft.com/v1.0/me/calendarView?$skiptoken=next'
+assert.deepEqual(graphPageQuery(link, endpoint, params), {{ ...params, $skiptoken: 'next' }})
+for (const invalid of [
+  link.replace('graph.microsoft.com', 'evil.example'),
+  link.replace('https:', 'http:'),
+  link.replace('/me/calendarView', '/users/other/calendarView'),
+  link + '&startDateTime=other',
+  link + '&$skiptoken=duplicate',
+  link + '&unexpected=value',
+  link + '#fragment',
+  link.replace('graph.microsoft.com', 'user@graph.microsoft.com'),
+]) assert.throws(() => graphPageQuery(invalid, endpoint, params))
+clearTeamsGraph()
+assert.equal(teamsGraphActive(), false)
+await assert.rejects(teamsGraphRequest('graph/inbox/'), /not initialized/)
+"""],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 TENANT = "22222222-2222-2222-2222-222222222222"
@@ -788,6 +824,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(result.json(), {"providers": [{
             "id": "work", "provider_id": "work", "name": "entraid-work", "client_id": CLIENT,
             "resource": f"api://portal.example.com/{CLIENT}",
+            "tenant_id": TENANT,
         }]})
         self.assertNotIn("fixture", str(result.json()))
         self.assertIn("csrftoken", result.cookies)

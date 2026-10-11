@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import * as TeamsSDK from './teams.js'
+import * as TeamsGraph from './teams-graph.js'
 
 const statuses = ['scheduled', 'completed', 'missed', 'rescheduled', 'cancelled']
 const labels = { dashboard: 'Overview', calls: 'Call log', calendar: 'Calendar', contacts: 'Contacts', inbox: 'Inbox', appointments: 'Appointment', profile: 'My profile', access: 'Workspace access' }
@@ -29,6 +30,8 @@ function localInput(value) {
 }
 function csrf() { return decodeURIComponent(document.cookie.split('; ').find(c => c.startsWith('csrftoken='))?.slice(10) || '') }
 async function api(path, options = {}) {
+  if (TeamsGraph.teamsGraphActive() && (!options.method || options.method === 'GET') &&
+      (path.startsWith('graph/') || path === 'profile/')) return TeamsGraph.teamsGraphRequest(path, options)
   const multipart = options.body instanceof FormData
   const response = await fetch(`/api/${path}`, {
     credentials: 'same-origin', ...options,
@@ -67,9 +70,19 @@ function Badge({ status }) { return <span class={`badge ${status}`}>{status}</sp
 function Contact({ contact }) { return <div class="contact-cell"><span class="avatar">{initials(contact?.name)}</span><span><strong>{contact?.name || 'Unknown contact'}</strong><small>{contact?.company?.name || contact?.email}</small></span></div> }
 function UserAvatar({ user, revision, large = false }) {
   const [failedSource, setFailedSource] = useState('')
+  const [graphPhoto, setGraphPhoto] = useState('')
+  useEffect(() => {
+    if (!TeamsGraph.teamsGraphActive() || user.picture_url !== '/api/graph/picture/') return
+    let active = true, objectUrl
+    const controller = new AbortController()
+    TeamsGraph.teamsGraphPhoto(controller.signal).then(blob => {
+      if (active && blob) { objectUrl = URL.createObjectURL(blob); setGraphPhoto(objectUrl) }
+    }).catch(() => {})
+    return () => { active = false; controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [user.id, user.picture_url, revision])
   const isLocalProfile = user.picture_url === '/api/profile/picture/'
   const isGraphProfile = user.picture_url === '/api/graph/picture/'
-  const source = isLocalProfile ? `${user.picture_url}?v=${revision}` : (isGraphProfile ? user.picture_url : '')
+  const source = isLocalProfile ? `${user.picture_url}?v=${revision}` : (isGraphProfile ? (TeamsGraph.teamsGraphActive() ? graphPhoto : user.picture_url) : '')
   return <span class={`avatar user-avatar${large ? ' profile-avatar' : ''}`}>{source && source !== failedSource ? <img src={source} alt={`${user.name || user.username}'s profile picture`} onError={() => setFailedSource(source)}/> : <span aria-label="Profile initials">{initials(user.name || user.username)}</span>}</span>
 }
 
@@ -200,6 +213,8 @@ function TeamsTab() {
   const [session, setSession] = useState(null), [error, setError] = useState(''), [loading, setLoading] = useState(true), [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let active = true
+    const controller = new AbortController()
+    TeamsGraph.clearTeamsGraph()
     setSession(null); setError(''); setLoading(true)
     async function signIn() {
       try {
@@ -218,6 +233,10 @@ function TeamsTab() {
         const value = await TeamsSDK.exchangeTeamsToken(providerId, token)
         if (!active) return
         if (!value.user) throw new Error('Teams sign-in did not create a session. Please try again.')
+        const profile = await api('graph/profile/')
+        if (!active) return
+        await TeamsGraph.startTeamsGraph(choices.find(provider => String(provider.id) === providerId), profile.id, controller.signal)
+        if (!active) return
         history.replaceState(null, '', `${location.pathname}?provider=${encodeURIComponent(providerId)}#/dashboard`)
         setSession(value)
       } catch (error) {
@@ -227,9 +246,9 @@ function TeamsTab() {
       }
     }
     signIn()
-    return () => { active = false }
+    return () => { active = false; controller.abort(); TeamsGraph.clearTeamsGraph() }
   }, [attempt])
-  if (session) return <WorkspaceApp initialSession={session} embedded onSessionEnd={() => { setSession(null); setError('Your Teams session has ended. Sign in again to continue.') }}/>
+  if (session) return <WorkspaceApp initialSession={session} embedded onSessionEnd={() => { TeamsGraph.clearTeamsGraph(); setSession(null); setError('Your Teams session has ended. Sign in again to continue.') }}/>
   return <div class="teams-page"><div class="teams-container"><h2>Gather for Teams</h2>{loading ? <><Loading/><p class="muted">Signing you in with Teams…</p></> : <><ErrorNotice error={error} retry={() => setAttempt(n => n + 1)}/>{!error && <><ProviderSelect providers={providers} selected={selected} onChange={setSelected}/><button class="button" disabled={!selected} onClick={() => { history.replaceState(null, '', `${location.pathname}?provider=${encodeURIComponent(selected)}${location.hash}`); setAttempt(n => n + 1) }}>Continue with Teams</button></>}<div class="actions"><a class="button secondary" href="/#/login" target="_blank" rel="noopener noreferrer">Open browser sign-in</a></div></>}</div></div>
 }
 

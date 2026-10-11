@@ -2,8 +2,10 @@
 
 ## What changed
 
-- The frontend uses the current Microsoft Teams JavaScript SDK
-  (`@microsoft/teams-js` 2.58.0), not the deprecated TeamsFx SDK.
+- Teams tabs call Graph using `@microsoft/teams.client` and
+  `@microsoft/teams.graph-endpoints`. An `App` starts with explicit
+  `User.Read`, `Calendars.Read`, `Mail.Read`, and `Presence.Read` prewarm scopes.
+  `@microsoft/teams-js` remains responsible for portal SSO and tab configuration.
 - `/teams/tab/` is the content page for a personal static tab and configured
   channel/group-chat tabs. It initializes Teams, requests the host user's SSO
   token automatically, and exchanges it for a portal session before opening the
@@ -21,15 +23,127 @@
   the page becomes visible. This is polling, not a webhook/push subscription:
   changes normally appear within 30 seconds plus Graph propagation latency.
   The portal never changes presence. Errors display an unknown status.
-- New server endpoints live under `/api/teams/` and `/api/graph/`. Access/refresh
-  tokens stay in server-side Django sessions, never browser storage or JSON
-  responses. Expired delegated tokens are refreshed server-side; if consent or
-  reauthentication is required, sign in again.
+- New server endpoints live under `/api/teams/` and `/api/graph/`. Browser OIDC
+  Graph access and portal SSO still use server-side access/refresh tokens, never
+  exposed in JSON responses. Teams tabs additionally acquire delegated Graph
+  tokens through the client SDK/MSAL, configured with an in-memory cache, and call
+  Graph directly for profile, photo, calendar, Inbox, and presence. The SDK Graph
+  identity must match the server-verified portal identity before opening the
+  workspace. No application-managed tokens are written to browser storage.
 
 Protect the session database and its backups as credentials: they contain
 delegated tokens. Keep Django's server-side session backend; do not switch to
 signed-cookie sessions. Use Django's existing `clearsessions` command in your
 operational maintenance to remove expired session rows.
+
+## Where Graph calls run
+
+The SDK integration **did not remove the server-side Graph implementation**.
+There are two delegated Graph clients: the Teams tab's SDK client and Django's
+`GraphClient`. All Graph paths below are relative to
+`https://graph.microsoft.com/v1.0`; all requests are read-only `GET` requests.
+
+| Operation | Teams tab | Ordinary browser Entra OIDC session |
+| --- | --- | --- |
+| Sign-in identity/profile check: `/me` | Django calls Graph during `/api/teams/sso/`, before SDK initialization | Django obtains Graph tokens through OIDC; profile reads run server-side |
+| Bootstrap identity: `/me` | Tab requests `/api/graph/profile/`; Django calls Graph before the SDK is active | Not an SDK bootstrap step |
+| SDK identity check: `/me?$select=id` | SDK calls Graph directly and compares the ID with the server-returned profile ID | Not used |
+| Profile view: `/me` | SDK calls Graph directly after initialization | Django calls Graph through `/api/profile/` or `/api/graph/profile/` |
+| Profile photo: `/me/photo/$value` | SDK HTTP client retrieves a blob directly; the UI uses a temporary object URL | Django proxies the photo through `/api/graph/picture/` |
+| Calendar: `/me/calendarView` | SDK calls Graph directly, including subsequent pages | Django calls Graph through `/api/graph/calendar/` |
+| Inbox: `/me/mailFolders/inbox/messages` | SDK calls Graph directly, including subsequent pages | Django calls Graph through `/api/graph/inbox/` |
+| Presence: `/me/presence` | SDK calls Graph directly on the polling schedule | Django calls Graph through `/api/graph/presence/` |
+| Session response profile: `/me` | Django still reads Graph when generating `/api/session/` responses, even after SDK initialization | Django reads Graph when generating session responses |
+| Server token-refresh identity check: `/me` | Django checks the stored object ID when refreshing its Graph token, if one is recorded | Same server-side behavior |
+
+After initialization, the tab's frontend request helper intercepts Graph/profile
+reads and routes them to `app.graph.call(...)`. Photo and pagination requests use
+the SDK's authenticated `app.graph.http` client; pagination query parameters are
+validated and applied to fixed Graph paths. These UI reads do **not** pass through
+Django's Graph endpoints. However, Django session responses still use the
+server-side Graph client; SDK initialization does not disable that behavior.
+Profile data already returned in the portal session also remains server-derived.
+
+Portal SSO, session management, logout, and local CRM APIs still call Django.
+CRM calls, appointments, companies, contacts, and KPIs are database operations,
+not Microsoft Graph requests. Local and non-`entraid` sign-ins do not use either
+Graph client.
+
+## Authentication: Teams SSO, OBO, and SDK tokens
+
+### Teams portal sign-in: server-side OBO
+
+The current tab startup performs the following sequence:
+
+1. The tab gets public provider configuration from `/api/teams/config/`, initializes
+   `@microsoft/teams-js`, and calls `authentication.getAuthToken()`. The returned
+   delegated token targets the **portal API**, not Microsoft Graph.
+2. The tab sends that token and the selected provider ID to `/api/teams/sso/`.
+   This POST requires the portal's CSRF token.
+3. Django validates the token's signature, tenant-specific issuer, audience,
+   timestamps, tenant, `access_as_user` scope, and authorized Teams client.
+   It matches the verified `oid`/`tid` to an explicitly linked, active OIDC
+   account; it does not trust an email address or Teams context ID for linking.
+4. Django performs **on-behalf-of (OBO)** at
+   `https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token`, using the
+   configured client ID and server-only client secret, the portal token as the
+   `assertion`, `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`,
+   `requested_token_use=on_behalf_of`, and scope
+   `https://graph.microsoft.com/.default offline_access`.
+5. Entra returns a delegated **Graph** access token and, when available, a
+   refresh token. Django calls Graph `/me` with that access token and requires
+   its ID to match the verified Teams token's `oid`.
+6. Only after those checks does Django sign in the linked portal user and store
+   the Graph credentials, expiry, tenant, and object ID in its server-side
+   session. The response contains portal session/profile data, not Graph tokens
+   or the client secret. The browser uses the Django session cookie for CRM APIs.
+
+### Teams Graph views: independent client-side SDK authentication
+
+After portal SSO succeeds, the tab fetches `/api/graph/profile/` through Django
+to obtain the expected Graph identity. It then starts a tenant-bound
+`@microsoft/teams.client` `App` with the four explicit delegated read scopes.
+The SDK/MSAL uses nested app authentication on supported hosts; if silent consent
+is unavailable, the tab requests an interactive token with an MSAL popup and
+sets the returned active account.
+
+The SDK calls Graph `/me?$select=id` directly and verifies that it matches the
+server-returned identity before exposing the workspace. Subsequent tab Graph
+views use tokens acquired and managed by SDK/MSAL, with an in-memory cache.
+They do **not** reuse Django's OBO Graph token, send the portal SSO token to Graph,
+or perform OBO in browser code. No client secret is available to the SDK.
+
+Thus the current Teams implementation has **two separate token acquisition
+paths for the same user**: server-side OBO for portal bootstrap/session Graph
+work, and SDK/MSAL for direct tab Graph reads. A successful portal SSO does not
+guarantee SDK consent, and vice versa. OBO or SDK initialization/identity failure
+prevents the tab from opening the workspace; SDK Graph read failures do not
+silently fall back to Django Graph reads once the SDK is active.
+
+### Ordinary browser OIDC and token renewal
+
+Browser Entra sign-in uses django-allauth's OIDC authorization-code flow, not
+the Teams assertion/OBO flow. Django captures the resulting delegated Graph
+access/refresh tokens in the server-side session. Without an active Teams SDK
+client, frontend Graph reads call Django, which attaches the server-held token.
+
+For either kind of server Graph session, Django reuses an access token while
+more than 60 seconds of validity remain. Otherwise, it uses the stored refresh
+token at the tenant token endpoint with `grant_type=refresh_token`; this is
+**token renewal, not another OBO exchange**. If a stored object ID exists, Django
+checks `/me` again after renewal. Missing refresh tokens, revoked authorization,
+or identity mismatch require signing in again. SDK/MSAL manages its own token
+acquisition separately from this server renewal path.
+
+The retained server Graph code is therefore still used and cannot simply be
+deleted: ordinary browser Graph views, Teams SSO/bootstrap, and session/profile
+responses depend on it. Removing Teams-specific OBO would require changing that
+authentication/bootstrap design while retaining an appropriate Graph path for
+browser OIDC sessions.
+
+Implementation references: `frontend/src/app.jsx`, `frontend/src/teams.js`,
+`frontend/src/teams-graph.js`, `crm/views.py`, `crm/teams.py`, `crm/graph.py`,
+and `crm/signals.py`.
 
 ## Entra application registration
 
@@ -58,6 +172,12 @@ UUID tenant-specific v2 issuers and the multitenant `organizations` issuer.
    consent. Do not add application permissions or write permissions.
    OIDC also requests `openid`, `profile`, `email`, and `offline_access`.
 6. Users need a Microsoft 365 mailbox/calendar and access to Teams presence.
+7. Add a **Single-page application** redirect URI for the portal origin
+   (`https://portal.example.com`, matching the SDK's redirect URI), as well as
+   `brk-multihub://portal.example.com` for nested app authentication in Teams.
+   Retain the confidential web application's OIDC callback and secret for Django;
+   never expose that secret to the frontend. Enable the SPA authorization-code
+   flow with PKCE, not implicit token issuance.
 
 Teams returns a token for the portal API, **not Graph**. The backend validates
 its RS256 signature using the tenant's Microsoft signing keys, v2 issuer, tenant,
@@ -188,6 +308,11 @@ stay open for Teams' Save flow. Outside Teams or when SSO/consent fails, the pag
 provides an explicit error/retry rather than silently signing in as a different
 existing browser user. Use browser OIDC sign-in to establish the account or
 renew consent, then return to Teams.
+
+The client SDK uses nested app authentication on supported Teams hosts. If silent
+Graph consent is unavailable, an interactive MSAL popup establishes the account;
+allow sign-in popups and retry if the browser blocks one. Consent or identity
+failure does not silently fall back to another user's Graph session.
 
 Graph failures are surfaced rather than silently substituting local inbox or
 calendar data. Read-only views follow Graph pagination. Email bodies are plain
