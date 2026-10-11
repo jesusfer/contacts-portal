@@ -535,8 +535,9 @@ def _get_graph_client(request):
         raise TokenExpiredError("Graph authorization required. Sign in again.")
     app = graph_provider(provider_id)
     token = GraphTokenManager.get_token(request, provider_id)
+    tenant = request.session[GraphTokenManager.SESSION_KEY][provider_id]["tenant_id"]
     return GraphClient(
-        token, provider_tenant(app), user_id=request.user.pk, provider_id=provider_id,
+        token, tenant, user_id=request.user.pk, provider_id=provider_id,
     )
 
 
@@ -644,15 +645,16 @@ def teams_sso(request):
         config = load_teams_config(app["settings"])
         claims = validate_teams_token(data["token"], config)
         account = get_teams_account(provider_id, claims)
-        token = exchange_graph_token(app, assertion=data["token"])
-        profile_data = GraphClient(token["access_token"], config["tenant_id"]).get_profile()
+        tenant = provider_tenant(app, claims["tid"])
+        token = exchange_graph_token(app, assertion=data["token"], tenant_id=tenant)
+        profile_data = GraphClient(token["access_token"], tenant).get_profile()
         if profile_data.get("id") != claims["oid"]:
             raise TeamsTokenError("Graph identity does not match the Teams identity.")
         login(request, account.user, backend="allauth.account.auth_backends.AuthenticationBackend")
         request.session[AUTH_SOURCE_SESSION_KEY] = provider_id
         GraphTokenManager.store_token(
             request, provider_id, token["access_token"], token.get("refresh_token"),
-            token["expires_in"], config["tenant_id"], oid=claims["oid"],
+            token["expires_in"], tenant, oid=claims["oid"],
         )
         request.session["crm_teams_authenticated"] = True
         graph_profile_json(request, profile_data)

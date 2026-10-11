@@ -33,13 +33,17 @@ operational maintenance to remove expired session rows.
 
 ## Entra application registration
 
-Use a **single-tenant** confidential web application. Public-cloud Microsoft
-Graph and UUID tenant-specific v2 issuers are supported; `common`, `organizations`,
-sovereign clouds, and multitenant issuers are not supported.
+Use a confidential web application. Public-cloud Microsoft Graph supports both
+UUID tenant-specific v2 issuers and the multitenant `organizations` issuer.
+`common`, consumer accounts, and sovereign clouds are not supported.
 
 1. Register the portal's web redirect URI:
    `https://portal.example.com/accounts/oidc/work/login/callback/`
    (replace `work` with the configured provider ID).
+   For multitenant sign-in, set **Supported account types** to accounts in any
+   organizational directory and use
+   `https://login.microsoftonline.com/organizations/v2.0` as the OIDC issuer.
+   For a single-tenant app, use its tenant UUID in the issuer URL instead.
 2. Create a client secret and keep it only in deployment secrets/environment.
    Use the same client ID for OIDC and the Teams manifest.
 3. Under **Expose an API**, set the Application ID URI to
@@ -56,11 +60,12 @@ sovereign clouds, and multitenant issuers are not supported.
 6. Users need a Microsoft 365 mailbox/calendar and access to Teams presence.
 
 Teams returns a token for the portal API, **not Graph**. The backend validates
-its RS256 signature using Microsoft's tenant keys, v2 issuer, tenant, audience,
-expiry, delegated scope, and authorized Teams client. Only then does it perform
-the on-behalf-of exchange against the tenant's token endpoint, requesting
-`https://graph.microsoft.com/.default`. A token for another tenant, app, or
-unauthorized client cannot sign in.
+its RS256 signature using the tenant's Microsoft signing keys, v2 issuer, tenant,
+audience, expiry, delegated scope, and authorized Teams client. With the
+`organizations` issuer, the tenant UUID from the signed token selects the issuer,
+keys, and on-behalf-of token endpoint; the UUID is validated before use. Only
+then does the backend request `https://graph.microsoft.com/.default`. A token
+for another app or unauthorized client cannot sign in.
 
 ## OIDC configuration
 
@@ -72,11 +77,10 @@ The following values are placeholders, not real credentials:
   {
     "id": "work",
     "name": "entraid-work",
-    "server_url": "https://login.microsoftonline.com/22222222-2222-2222-2222-222222222222/v2.0",
+    "server_url": "https://login.microsoftonline.com/organizations/v2.0",
     "client_id": "11111111-1111-1111-1111-111111111111",
     "client_secret": "<secret-from-private-deployment-settings>",
     "teams": {
-      "tenant_id": "22222222-2222-2222-2222-222222222222",
       "resource": "api://portal.example.com/11111111-1111-1111-1111-111111111111"
     }
   }
@@ -87,7 +91,7 @@ The following values are placeholders, not real credentials:
 
 | Setting | Meaning |
 | --- | --- |
-| `tenant_id` | Defaults to the issuer's tenant UUID; must match it |
+| `tenant_id` | Defaults to the OIDC issuer tenant; use `organizations` for multitenant sign-in |
 | `resource` | Required Application ID URI; must end in `/<client_id>` |
 | `audience` | Defaults to `client_id`; v2 API tokens must use that exact audience |
 | `authorized_client_ids` | Optional nonempty UUID array; defaults to the two Teams clients above |
@@ -98,13 +102,14 @@ provider. No tokens or client secrets are exposed by the public Teams
 configuration endpoint.
 
 **Identity linking:** sign in once in a normal browser using the same Entra
-provider before using Teams SSO. This creates the OIDC social-account association
-with the provider's verified tenant/object identity. Administrators must still
-provision the user's Agent and company associations for CRM access. Teams SSO
-uses that explicit association; it does not link accounts by email or trust the
-Teams context's user ID. Existing associations without tenant/object claims need
-a fresh browser OIDC sign-in. Linking a different provider does not enable Graph
-for an existing local session; sign in through the Entra provider.
+provider before using Teams SSO. For multitenant sign-in, use the `organizations`
+issuer. This creates the OIDC social-account association with the provider's
+verified tenant/object identity. Administrators must still provision the user's
+Agent and company associations for CRM access. Teams SSO uses that explicit
+association; it does not link accounts by email or trust the Teams context's user
+ID. Existing associations without tenant/object claims need a fresh browser OIDC
+sign-in. Linking a different provider does not enable Graph for an existing local
+session; sign in through the Entra provider.
 
 ## Create the Teams app package
 
@@ -200,8 +205,9 @@ Verify with a real tenant:
    clicking anything, including after returning to the tab.
 5. Confirm local and non-`entraid` OIDC accounts retain local behavior.
 6. Test revoked consent, expired tokens, missing photo/mailbox, multiple
-   providers, and blocked third-party cookies. An unprovisioned user must not
-   gain CRM directory or activity access.
+   providers, multitenant users from distinct directories, and blocked
+   third-party cookies. An unprovisioned user must not gain CRM directory or
+   activity access.
 
 Automated validation uses the existing Django test/check commands and frontend
 build described in README.md. Graph/SSO tests mock Microsoft endpoints; real

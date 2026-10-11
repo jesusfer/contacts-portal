@@ -8,6 +8,7 @@ from allauth.account.signals import user_logged_in as allauth_user_logged_in
 from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.internal.flows.login import complete_login
 from allauth.socialaccount.models import SocialAccount, SocialToken
+from allauth.socialaccount.providers.oauth2.client import OAuth2Error
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -21,6 +22,7 @@ from config.urls import urlpatterns as project_patterns
 from .graph import GraphClient, GraphClientError, InvalidCursor, TokenExpiredError
 from .signals import AUTH_SOURCE_SESSION_KEY
 from .models import UserProfile
+from .openid_connect import TenantAwareOpenIDConnectOAuth2Adapter
 from .teams import GraphTokenManager, TeamsTokenError, validate_teams_token
 
 
@@ -150,6 +152,21 @@ class TeamsJWTTests(SignedTokenMixin, SimpleTestCase):
             validate_teams_token(self.token(), CONFIG)
         self.assertEqual(keys.call_count, 2)
 
+    def test_organizations_issuer_uses_token_tenant_for_validation(self):
+        other_tenant = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        claims = {
+            **self.claims(), "tid": other_tenant,
+            "iss": f"https://login.microsoftonline.com/{other_tenant}/v2.0",
+        }
+        with patch("crm.teams._get_jwks", return_value=self.jwks) as keys:
+            result = validate_teams_token(self.token(claims), {**CONFIG, "tenant_id": "organizations"})
+        self.assertEqual(result["tid"], other_tenant)
+        keys.assert_called_once_with(other_tenant, reload=False)
+
+    def test_organizations_issuer_rejects_non_uuid_tenant(self):
+        with self.assertRaises(TeamsTokenError):
+            self.validate({**self.claims(), "tid": "organizations"})
+
     @patch("crm.teams.requests.get")
     def test_jwks_fixed_tenant_endpoint_does_not_follow_redirect(self, get):
         cache.clear()
@@ -159,6 +176,48 @@ class TeamsJWTTests(SignedTokenMixin, SimpleTestCase):
         self.assertEqual(get.call_args.args[0],
                          f"https://login.microsoftonline.com/{TENANT}/discovery/v2.0/keys")
         self.assertIs(get.call_args.kwargs["allow_redirects"], False)
+
+
+class TenantAwareOIDCTests(SimpleTestCase):
+    def token(self, tenant_id):
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        return jwt.encode({"tid": tenant_id}, key, algorithm="RS256", headers={"kid": "test-key"})
+
+    @patch("crm.openid_connect.jwtkit.verify_and_decode")
+    def test_organizations_oidc_issuer_is_bound_to_token_tenant(self, verify):
+        token = self.token(TENANT)
+        verify.return_value = {"tid": TENANT}
+        adapter = Mock(
+            get_provider=Mock(return_value=SimpleNamespace(
+                app=SimpleNamespace(settings={"graph_tenant_id": "organizations"}),
+            )),
+            openid_config={"jwks_uri": "https://login.microsoftonline.com/organizations/keys"},
+            did_fetch_access_token=True,
+        )
+        result = TenantAwareOpenIDConnectOAuth2Adapter._decode_id_token(adapter, SimpleNamespace(
+            client_id=CLIENT,
+        ), token)
+        self.assertEqual(result, {"tid": TENANT})
+        self.assertEqual(verify.call_args.kwargs["issuer"],
+                         f"https://login.microsoftonline.com/{TENANT}/v2.0")
+        self.assertEqual(verify.call_args.kwargs["keys_url"],
+                         "https://login.microsoftonline.com/organizations/keys")
+
+    @patch("crm.openid_connect.jwtkit.verify_and_decode")
+    def test_organizations_oidc_rejects_tenant_identity_mismatch(self, verify):
+        token = self.token(TENANT)
+        verify.return_value = {"tid": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}
+        adapter = Mock(
+            get_provider=Mock(return_value=SimpleNamespace(
+                app=SimpleNamespace(settings={"graph_tenant_id": "organizations"}),
+            )),
+            openid_config={"jwks_uri": "https://login.microsoftonline.com/organizations/keys"},
+            did_fetch_access_token=True,
+        )
+        with self.assertRaises(OAuth2Error):
+            TenantAwareOpenIDConnectOAuth2Adapter._decode_id_token(adapter, SimpleNamespace(
+                client_id=CLIENT,
+            ), token)
 
 
 class GraphClientTests(SimpleTestCase):
