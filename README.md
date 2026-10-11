@@ -149,7 +149,7 @@ in `.env`), with one object per identity provider:
 ```
 [
   {
-    "id": "work",
+    "id": "entraid-work",
     "name": "Work identity",
     "server_url": "https://identity.example.org",
     "client_id": "contacts-portal",
@@ -187,8 +187,9 @@ dashboard displays OIDC rather than guessing a provider name.
 
 For Microsoft Teams static/configurable tabs, automatic SSO, and delegated
 Microsoft Graph calendar, inbox, profile, and presence integration, see
-[teams.md](teams.md). Providers named `entraid...` use Graph-backed, read-only
-profile/calendar/inbox views; the local behavior below applies to other logins.
+[teams.md](teams.md). Providers whose configured ID starts with `entraid`
+use Graph-backed, read-only profile/calendar/inbox views; the local behavior
+below applies to other logins.
 
 Signed-in users can open **Profile** to update their first and last names and
 upload, replace, or remove their profile picture. Profile access is available

@@ -25,7 +25,7 @@ class TeamsTokenError(ValueError):
 def graph_provider(provider_id):
     return next((
         app for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
-        if app["provider_id"] == provider_id and app["name"].lower().startswith("entraid")
+        if app["provider_id"] == provider_id and app["provider_id"].lower().startswith("entraid")
     ), None)
 
 

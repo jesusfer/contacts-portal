@@ -106,7 +106,7 @@ responses. It does not expose tokens or secrets.
   channel/group-chat tabs. It initializes Teams, requests the host user's SSO
   token automatically, and uses the startup option above. `/teams/config/`
   registers the Teams tab configuration/save handler.
-- Providers whose configured **name**, not ID, starts with `entraid`
+- Providers whose configured **ID** starts with `entraid`
   (case-insensitive) use delegated Graph access, including ordinary browser OIDC
   sessions. Other providers and local sign-ins keep the existing CRM behavior.
 - Graph reads the signed-in user's default calendar, Inbox folder, profile
@@ -290,7 +290,7 @@ The following values are placeholders, not real credentials:
 ```json
 [
   {
-    "id": "work",
+    "id": "entraid-work",
     "name": "entraid-work",
     "server_url": "https://login.microsoftonline.com/organizations/v2.0",
     "client_id": "11111111-1111-1111-1111-111111111111",

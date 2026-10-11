@@ -71,7 +71,7 @@ def configure_oidc(raw, *, debug):
         ):
             raise ImproperlyConfigured("OIDC server_url requires an HTTPS issuer (HTTP allowed in DEBUG).")
         app_settings = {"server_url": provider["server_url"].rstrip("/")}
-        graph_enabled = provider["name"].lower().startswith("entraid")
+        graph_enabled = provider["id"].lower().startswith("entraid")
         scope = provider.get("scope", GRAPH_SCOPES if graph_enabled else None)
         if scope is not None:
             if not isinstance(scope, list) or not scope or any(
