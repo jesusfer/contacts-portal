@@ -29,6 +29,7 @@ urlpatterns = [
     # Teams configuration and SSO
     path("api/teams/config/", views.teams_config),
     path("api/teams/sso/", views.teams_sso),
+    path("api/teams/identity/", views.teams_identity),
     re_path(r"^(?:api|accounts|admin|static|media)(?:/|$)", views.not_found),
     re_path(r"^.*$", views.spa),
 ]

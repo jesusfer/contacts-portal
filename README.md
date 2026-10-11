@@ -132,6 +132,12 @@ not actual received or sent emails.
 
 ## Authentication and OIDC
 
+Teams tabs default to a Graph-only SPA with automatic Teams SSO and direct SDK
+Graph reads. **Open full dashboard** explicitly uses the existing server-side
+OBO flow. Set `TEAMS_GRAPH_ONLY=0` (default: `1`) to retain automatic OBO/dashboard
+startup. See [Teams integration](teams.md) for both authentication diagrams,
+Entra setup, and deployment requirements.
+
 Local authentication uses Django usernames/passwords; public password signup
 is disabled. Login throttling uses Django's default process-local cache, so its
 limits apply independently to each worker; put shared rate limiting at the

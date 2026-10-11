@@ -33,8 +33,8 @@ async function request(path, options = {}) {
   return data
 }
 
-export function exchangeTeamsToken(providerId, token) {
-  return request('sso', {
+export function exchangeTeamsToken(providerId, token, { graphOnly = false } = {}) {
+  return request(graphOnly ? 'identity' : 'sso', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
     body: JSON.stringify({ provider_id: providerId, token }),

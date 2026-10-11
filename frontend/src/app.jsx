@@ -211,11 +211,15 @@ function ProviderSelect({ providers, selected, onChange }) {
 function TeamsTab() {
   const [providers, setProviders] = useState([]), [selected, setSelected] = useState('')
   const [session, setSession] = useState(null), [error, setError] = useState(''), [loading, setLoading] = useState(true), [attempt, setAttempt] = useState(0)
+  const [graphUser, setGraphUser] = useState(null), [opening, setOpening] = useState(false)
+  const identity = useRef(null), lifetime = useRef(null)
   useEffect(() => {
     let active = true
     const controller = new AbortController()
+    lifetime.current = controller
     TeamsGraph.clearTeamsGraph()
-    setSession(null); setError(''); setLoading(true)
+    identity.current = null
+    setSession(null); setGraphUser(null); setError(''); setLoading(true)
     async function signIn() {
       try {
         const config = await TeamsSDK.getTeamsConfig()
@@ -230,15 +234,22 @@ function TeamsTab() {
         const token = await TeamsSDK.getTeamsAuthToken()
         if (!active) return
         if (!token) throw new Error('Teams could not provide a sign-in token. Please try again.')
-        const value = await TeamsSDK.exchangeTeamsToken(providerId, token)
+        const graphOnly = config.graph_only !== false
+        const value = await TeamsSDK.exchangeTeamsToken(providerId, token, { graphOnly })
         if (!active) return
-        if (!value.user) throw new Error('Teams sign-in did not create a session. Please try again.')
-        const profile = await api('graph/profile/')
+        const verified = graphOnly ? value : value.teams_identity
+        if (!verified?.id || !verified.tenant_id) throw new Error('Teams sign-in did not verify an identity. Please try again.')
+        identity.current = verified
+        await TeamsGraph.startTeamsGraph({ ...choices.find(provider => String(provider.id) === providerId), tenant_id: verified.tenant_id }, verified.id, controller.signal)
         if (!active) return
-        await TeamsGraph.startTeamsGraph(choices.find(provider => String(provider.id) === providerId), profile.id, controller.signal)
-        if (!active) return
-        history.replaceState(null, '', `${location.pathname}?provider=${encodeURIComponent(providerId)}#/dashboard`)
-        setSession(value)
+        if (graphOnly) {
+          const profile = await TeamsGraph.teamsGraphRequest('graph/profile/', { signal: controller.signal })
+          if (active) setGraphUser({ ...profile, name: profile.display_name })
+        } else {
+          if (!value.user) throw new Error('Teams sign-in did not create a session. Please try again.')
+          history.replaceState(null, '', `${location.pathname}?provider=${encodeURIComponent(providerId)}#/dashboard`)
+          setSession(value)
+        }
       } catch (error) {
         if (active) setError(`Unable to sign in with Teams. ${error.message}`)
       } finally {
@@ -248,8 +259,42 @@ function TeamsTab() {
     signIn()
     return () => { active = false; controller.abort(); TeamsGraph.clearTeamsGraph() }
   }, [attempt])
-  if (session) return <WorkspaceApp initialSession={session} embedded onSessionEnd={() => { TeamsGraph.clearTeamsGraph(); setSession(null); setError('Your Teams session has ended. Sign in again to continue.') }}/>
+  async function openDashboard() {
+    setOpening(true); setError('')
+    try {
+      const token = await TeamsSDK.getTeamsAuthToken()
+      const verified = await TeamsSDK.exchangeTeamsToken(selected, token, { graphOnly: true })
+      if (verified.id !== identity.current?.id || verified.tenant_id !== identity.current?.tenant_id) throw new Error('Teams identity changed. Reload this tab to sign in again.')
+      const value = await TeamsSDK.exchangeTeamsToken(selected, token)
+      lifetime.current.signal.throwIfAborted()
+      if (!value.user) throw new Error('Teams sign-in did not create a session. Please try again.')
+      history.replaceState(null, '', `${location.pathname}?provider=${encodeURIComponent(selected)}#/dashboard`)
+      setSession(value)
+    } catch (error) {
+      if (!lifetime.current.signal.aborted) setError(`Unable to open the full dashboard. ${error.message}`)
+    } finally {
+      if (!lifetime.current.signal.aborted) setOpening(false)
+    }
+  }
+  if (session) return <WorkspaceApp initialSession={session} embedded onSessionEnd={() => { TeamsGraph.clearTeamsGraph(); setSession(null); setGraphUser(null); setError('Your Teams session has ended. Sign in again to continue.') }}/>
+  if (graphUser) return <TeamsGraphWorkspace user={graphUser} error={error} opening={opening} openDashboard={openDashboard}/>
   return <div class="teams-page"><div class="teams-container"><h2>Gather for Teams</h2>{loading ? <><Loading/><p class="muted">Signing you in with Teams…</p></> : <><ErrorNotice error={error} retry={() => setAttempt(n => n + 1)}/>{!error && <><ProviderSelect providers={providers} selected={selected} onChange={setSelected}/><button class="button" disabled={!selected} onClick={() => { history.replaceState(null, '', `${location.pathname}?provider=${encodeURIComponent(selected)}${location.hash}`); setAttempt(n => n + 1) }}>Continue with Teams</button></>}<div class="actions"><a class="button secondary" href="/#/login" target="_blank" rel="noopener noreferrer">Open browser sign-in</a></div></>}</div></div>
+}
+
+function TeamsGraphWorkspace({ user, error, opening, openDashboard }) {
+  const [route, setRoute] = useState(location.hash.slice(1)), [version, setVersion] = useState(0)
+  useEffect(() => {
+    const changed = () => setRoute(location.hash.slice(1))
+    window.addEventListener('hashchange', changed)
+    return () => window.removeEventListener('hashchange', changed)
+  }, [])
+  return <main class="content">
+    <PageHeading title="Gather for Teams" subtitle="Your Microsoft 365 data. CRM data is available in the full dashboard."/>
+    <div class="actions"><UserAvatar user={user} revision={version}/><strong>{user.name} <GraphPresenceIndicator user={user}/></strong><span>{user.email}</span></div>
+    <nav class="actions" aria-label="Microsoft 365 navigation"><a class="button secondary" href="#/overview">Overview</a><a class="button secondary" href="#/calendar">Calendar</a><a class="button secondary" href="#/inbox">Inbox</a><button class="button secondary" onClick={() => setVersion(n => n + 1)}>Refresh</button><button class="button" disabled={opening} onClick={openDashboard}>{opening ? 'Opening dashboard…' : 'Open full dashboard'}</button></nav>
+    <ErrorNotice error={error}/>
+    {route === '/calendar' ? <GraphCalendar version={version}/> : route === '/inbox' ? <GraphInbox version={version}/> : <div class="dashboard-grid"><GraphCalendar version={version}/><GraphInbox version={version}/></div>}
+  </main>
 }
 
 function TeamsConfig() {

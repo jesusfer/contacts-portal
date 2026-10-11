@@ -1,6 +1,102 @@
 # Microsoft Teams and Microsoft Graph integration
 
-## What changed
+## Teams startup options
+
+`TEAMS_GRAPH_ONLY=1` (the default) opens a Graph-only SPA at `/teams/tab/`.
+The Teams SDK automatically requests SSO; Django validates that portal-targeted
+token at `/api/teams/identity/` and returns only the verified object and tenant
+IDs. This does **not** sign into Django, look up a CRM account, exchange an OBO
+token, or call Graph from the server. All displayed data comes directly from
+Graph through `@microsoft/teams.client` and `@microsoft/teams.graph-endpoints`:
+profile/photo, calendar, Inbox, and polling presence. No CRM data or session
+requests are made during this startup.
+
+The SPA stays on the tab without redirecting or automatically opening the
+dashboard. **Open full dashboard** explicitly obtains a fresh Teams SSO token,
+checks it against the current Graph identity, and invokes the existing
+`/api/teams/sso/` OBO flow. A linked active OIDC account is required at this
+point; Agent provisioning is still required for CRM data access. On success the
+full dashboard opens in the same tab. Failure leaves the Graph-only views open
+with an error, so missing CRM provisioning does not block Microsoft 365 reads.
+
+Set `TEAMS_GRAPH_ONLY=0` to retain the legacy behavior: automatic portal SSO/OBO,
+SDK Graph initialization, then the embedded full dashboard. The switch is a
+runtime Django environment setting, also passed through Docker Compose from
+your private `.env`; restart/recreate the container after changing it. It selects
+startup behavior, not authorization: the OBO endpoint remains available for the
+explicit dashboard action in either mode. Browser OIDC and local login are
+unchanged.
+
+### Default Graph-only flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Tab as Teams SPA
+    participant Teams as Teams SDK / host
+    participant Django
+    participant Entra
+    participant Graph as Microsoft Graph
+    User->>Tab: Open /teams/tab/
+    Tab->>Django: GET /api/teams/config/
+    Django-->>Tab: Public config, graph_only=true, CSRF cookie
+    Tab->>Teams: initialize + getAuthToken (automatic SSO)
+    Teams-->>Tab: Portal API token
+    Tab->>Django: POST /api/teams/identity/ (CSRF)
+    Django->>Entra: Signing keys when needed
+    Django-->>Tab: Verified oid and tenant (no login / OBO)
+    Tab->>Entra: SDK/MSAL delegated Graph token (silent or popup)
+    Tab->>Graph: GET /me; verify tenant and object identity
+    Graph-->>Tab: Profile; SDK reads photo, calendar, Inbox, presence
+    Note over Tab,Django: Stay in SPA; no CRM or server Graph reads
+    opt User chooses Open full dashboard
+        User->>Tab: Open full dashboard
+        Tab->>Teams: Fresh getAuthToken
+        Tab->>Django: POST /api/teams/identity/; compare identity
+        Tab->>Django: POST /api/teams/sso/ (CSRF)
+        Django->>Django: Validate token and linked active OIDC account
+        Django->>Entra: OBO exchange (server-only secret)
+        Entra-->>Django: Delegated Graph access / refresh tokens
+        Django->>Graph: GET /me; verify oid
+        Django-->>Tab: Django session cookie and dashboard session
+        Note over Tab,Django: Full CRM APIs now require Agent provisioning
+    end
+```
+
+### Legacy automatic dashboard flow (`TEAMS_GRAPH_ONLY=0`)
+
+```mermaid
+sequenceDiagram
+    participant Tab as Teams tab
+    participant Teams as Teams SDK / host
+    participant Django
+    participant Entra
+    participant Graph as Microsoft Graph
+    Tab->>Django: GET /api/teams/config/
+    Django-->>Tab: Public config, graph_only=false, CSRF cookie
+    Tab->>Teams: initialize + getAuthToken (automatic SSO)
+    Teams-->>Tab: Portal API token
+    Tab->>Django: POST /api/teams/sso/ (CSRF)
+    Django->>Django: Validate token and linked active OIDC account
+    Django->>Entra: OBO exchange (server-only secret)
+    Entra-->>Django: Delegated Graph access / refresh tokens
+    Django->>Graph: GET /me; verify oid
+    Django-->>Tab: Session cookie, profile, verified oid / tenant
+    Tab->>Entra: SDK/MSAL delegated Graph token (silent or popup)
+    Tab->>Graph: GET /me; verify tenant and oid
+    Note over Tab,Django: Automatically open full embedded dashboard
+    Tab->>Graph: SDK profile, photo, calendar, Inbox, presence reads
+    Tab->>Django: Session and agent-scoped CRM APIs
+```
+
+Both options validate the signed Teams identity, not email or an unverified host
+context ID. SDK/MSAL tokens use an in-memory cache; the portal API SSO token is
+never sent to Graph. Consent/identity failures never silently fall back to
+another browser user's session or server Graph data. The identity endpoint is
+CSRF-protected, input-size-limited, rate-limited, and returns private/no-store
+responses. It does not expose tokens or secrets.
+
+## Integration details
 
 - Teams tabs call Graph using `@microsoft/teams.client` and
   `@microsoft/teams.graph-endpoints`. An `App` starts with explicit
@@ -8,8 +104,8 @@
   `@microsoft/teams-js` remains responsible for portal SSO and tab configuration.
 - `/teams/tab/` is the content page for a personal static tab and configured
   channel/group-chat tabs. It initializes Teams, requests the host user's SSO
-  token automatically, and exchanges it for a portal session before opening the
-  dashboard. `/teams/config/` registers the Teams tab configuration/save handler.
+  token automatically, and uses the startup option above. `/teams/config/`
+  registers the Teams tab configuration/save handler.
 - Providers whose configured **name**, not ID, starts with `entraid`
   (case-insensitive) use delegated Graph access, including ordinary browser OIDC
   sessions. Other providers and local sign-ins keep the existing CRM behavior.
@@ -28,8 +124,8 @@
   exposed in JSON responses. Teams tabs additionally acquire delegated Graph
   tokens through the client SDK/MSAL, configured with an in-memory cache, and call
   Graph directly for profile, photo, calendar, Inbox, and presence. The SDK Graph
-  identity must match the server-verified portal identity before opening the
-  workspace. No application-managed tokens are written to browser storage.
+  identity must match the server-verified Teams identity before exposing data.
+  No application-managed tokens are written to browser storage.
 
 Protect the session database and its backups as credentials: they contain
 delegated tokens. Keep Django's server-side session backend; do not switch to
@@ -45,15 +141,15 @@ There are two delegated Graph clients: the Teams tab's SDK client and Django's
 
 | Operation | Teams tab | Ordinary browser Entra OIDC session |
 | --- | --- | --- |
-| Sign-in identity/profile check: `/me` | Django calls Graph during `/api/teams/sso/`, before SDK initialization | Django obtains Graph tokens through OIDC; profile reads run server-side |
-| Bootstrap identity: `/me` | Tab requests `/api/graph/profile/`; Django calls Graph before the SDK is active | Not an SDK bootstrap step |
+| Sign-in identity/profile check: `/me` | Django calls Graph only during `/api/teams/sso/` (legacy startup or explicit dashboard action) | Django obtains Graph tokens through OIDC; profile reads run server-side |
+| Bootstrap identity | Verified Teams `oid`/`tid` returned by `/api/teams/identity/` or `/api/teams/sso/`; no `/api/graph/profile/` bootstrap | Not an SDK bootstrap step |
 | SDK identity check: `/me?$select=id` | SDK calls Graph directly and compares the ID with the server-returned profile ID | Not used |
 | Profile view: `/me` | SDK calls Graph directly after initialization | Django calls Graph through `/api/profile/` or `/api/graph/profile/` |
 | Profile photo: `/me/photo/$value` | SDK HTTP client retrieves a blob directly; the UI uses a temporary object URL | Django proxies the photo through `/api/graph/picture/` |
 | Calendar: `/me/calendarView` | SDK calls Graph directly, including subsequent pages | Django calls Graph through `/api/graph/calendar/` |
 | Inbox: `/me/mailFolders/inbox/messages` | SDK calls Graph directly, including subsequent pages | Django calls Graph through `/api/graph/inbox/` |
 | Presence: `/me/presence` | SDK calls Graph directly on the polling schedule | Django calls Graph through `/api/graph/presence/` |
-| Session response profile: `/me` | Django still reads Graph when generating `/api/session/` responses, even after SDK initialization | Django reads Graph when generating session responses |
+| Session response profile: `/me` | Only the full dashboard requests Django session responses; Graph-only SPA does not | Django reads Graph when generating session responses |
 | Server token-refresh identity check: `/me` | Django checks the stored object ID when refreshing its Graph token, if one is recorded | Same server-side behavior |
 
 After initialization, the tab's frontend request helper intercepts Graph/profile
@@ -61,8 +157,8 @@ reads and routes them to `app.graph.call(...)`. Photo and pagination requests us
 the SDK's authenticated `app.graph.http` client; pagination query parameters are
 validated and applied to fixed Graph paths. These UI reads do **not** pass through
 Django's Graph endpoints. However, Django session responses still use the
-server-side Graph client; SDK initialization does not disable that behavior.
-Profile data already returned in the portal session also remains server-derived.
+server-side Graph client in the full dashboard; the Graph-only SPA never requests
+them. Profile data in a portal session remains server-derived.
 
 Portal SSO, session management, logout, and local CRM APIs still call Django.
 CRM calls, appointments, companies, contacts, and KPIs are database operations,
@@ -73,7 +169,7 @@ Graph client.
 
 ### Teams portal sign-in: server-side OBO
 
-The current tab startup performs the following sequence:
+Legacy startup and the explicit full-dashboard action perform this sequence:
 
 1. The tab gets public provider configuration from `/api/teams/config/`, initializes
    `@microsoft/teams-js`, and calls `authentication.getAuthToken()`. The returned
@@ -100,24 +196,25 @@ The current tab startup performs the following sequence:
 
 ### Teams Graph views: independent client-side SDK authentication
 
-After portal SSO succeeds, the tab fetches `/api/graph/profile/` through Django
-to obtain the expected Graph identity. It then starts a tenant-bound
+After Teams token validation succeeds, the tab obtains the verified object and
+tenant IDs from the identity endpoint (default) or OBO response (legacy). It starts a tenant-bound
 `@microsoft/teams.client` `App` with the four explicit delegated read scopes.
 The SDK/MSAL uses nested app authentication on supported hosts; if silent consent
 is unavailable, the tab requests an interactive token with an MSAL popup and
 sets the returned active account.
 
 The SDK calls Graph `/me?$select=id` directly and verifies that it matches the
-server-returned identity before exposing the workspace. Subsequent tab Graph
+server-verified Teams identity before exposing the views. Subsequent tab Graph
 views use tokens acquired and managed by SDK/MSAL, with an in-memory cache.
 They do **not** reuse Django's OBO Graph token, send the portal SSO token to Graph,
 or perform OBO in browser code. No client secret is available to the SDK.
 
-Thus the current Teams implementation has **two separate token acquisition
-paths for the same user**: server-side OBO for portal bootstrap/session Graph
-work, and SDK/MSAL for direct tab Graph reads. A successful portal SSO does not
+Thus the full dashboard has **two separate token acquisition paths for the same
+user**: server-side OBO for portal session Graph work, and SDK/MSAL for direct tab
+Graph reads. The default Graph-only startup uses only the SDK Graph token path.
+A successful portal SSO does not
 guarantee SDK consent, and vice versa. OBO or SDK initialization/identity failure
-prevents the tab from opening the workspace; SDK Graph read failures do not
+prevents the full dashboard from opening; SDK Graph read failures do not
 silently fall back to Django Graph reads once the SDK is active.
 
 ### Ordinary browser OIDC and token renewal
@@ -136,10 +233,8 @@ or identity mismatch require signing in again. SDK/MSAL manages its own token
 acquisition separately from this server renewal path.
 
 The retained server Graph code is therefore still used and cannot simply be
-deleted: ordinary browser Graph views, Teams SSO/bootstrap, and session/profile
-responses depend on it. Removing Teams-specific OBO would require changing that
-authentication/bootstrap design while retaining an appropriate Graph path for
-browser OIDC sessions.
+deleted: ordinary browser Graph views, full-dashboard Teams SSO, and portal
+session/profile responses depend on it. Graph-only startup does not use it.
 
 Implementation references: `frontend/src/app.jsx`, `frontend/src/teams.js`,
 `frontend/src/teams-graph.js`, `crm/views.py`, `crm/teams.py`, `crm/graph.py`,
@@ -221,8 +316,9 @@ remove the required read permissions or `offline_access` from an `entraid`
 provider. No tokens or client secrets are exposed by the public Teams
 configuration endpoint.
 
-**Identity linking:** sign in once in a normal browser using the same Entra
-provider before using Teams SSO. For multitenant sign-in, use the `organizations`
+**Identity linking for the full dashboard:** sign in once in a normal browser
+using the same Entra provider before using OBO portal SSO. The default Graph-only
+SPA does not require a linked CRM account or Agent. For multitenant sign-in, use the `organizations`
 issuer. This creates the OIDC social-account association with the provider's
 verified tenant/object identity. Administrators must still provision the user's
 Agent and company associations for CRM access. Teams SSO uses that explicit
@@ -324,7 +420,12 @@ Verify with a real tenant:
 
 1. Browser Entra sign-in: confirm Graph name/email/photo, default calendar and
    Inbox; check local profile edits and inbox flags are unavailable.
-2. Personal Teams tab: confirm automatic SSO and the correct user's dashboard.
+2. Personal Teams tab with `TEAMS_GRAPH_ONLY=1`: confirm automatic SSO and the
+   correct user's Graph-only views with no `/api/session/`, `/api/graph/`, CRM API,
+   or `/api/teams/sso/` requests. Check an Entra user with no linked CRM account.
+   Choose **Open full dashboard** and confirm OBO occurs only then, including
+   failure for an unlinked account and access-pending UI for a missing Agent.
+   With `TEAMS_GRAPH_ONLY=0`, confirm automatic OBO and the embedded dashboard.
 3. Channel/chat tab: save configuration and reopen the saved tab.
 4. Change availability in Teams; confirm the sidebar badge updates without
    clicking anything, including after returning to the tab.
