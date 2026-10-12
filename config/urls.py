@@ -30,6 +30,8 @@ urlpatterns = [
     path("api/teams/config/", views.teams_config),
     path("api/teams/sso/", views.teams_sso),
     path("api/teams/identity/", views.teams_identity),
+    path("api/teams/customers/", views.teams_customers),
+    path("api/teams/customers/<int:pk>/", views.teams_customer),
     re_path(r"^(?:api|accounts|admin|static|media)(?:/|$)", views.not_found),
     re_path(r"^.*$", views.spa),
 ]

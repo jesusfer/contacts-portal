@@ -637,6 +637,35 @@ def teams_identity(request):
     return _teams_auth(request, graph_only=True)
 
 
+def teams_crm_authorized(request):
+    provider_id = request.session.get(AUTH_SOURCE_SESSION_KEY)
+    app = graph_provider(provider_id)
+    return (
+        request.session.get("crm_teams_authenticated") is True
+        and app is not None and bool(app["settings"].get("teams"))
+        and request.GET.get("provider") == provider_id
+    )
+
+
+@api(["GET"])
+def teams_customers(request):
+    if not teams_crm_authorized(request):
+        return error("Sign in to the CRM with Teams SSO first.", 403)
+    return JsonResponse({"customers": [company_json(item) for item in Company.objects.all()]})
+
+
+@api(["GET"])
+def teams_customer(request, pk):
+    if not teams_crm_authorized(request):
+        return error("Sign in to the CRM with Teams SSO first.", 403)
+    company = get_object_or_404(Company, pk=pk)
+    return JsonResponse({
+        "customer": company_json(company),
+        "contacts": [contact_json(item) for item in directory_contacts().filter(company=company)],
+        "calls": [call_json(item) for item in scoped_calls(request).filter(contact__company=company)],
+    })
+
+
 def _teams_auth(request, *, graph_only=False):
     if len(request.body) > 32768:
         return error("Teams SSO request is too large.", 400)

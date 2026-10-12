@@ -25,8 +25,8 @@ export async function getTeamsAuthToken() {
   return authentication.getAuthToken()
 }
 
-async function request(path, options = {}) {
-  const response = await fetch(`/api/teams/${path}/`, { credentials: 'same-origin', ...options })
+async function request(path, options = {}, query = '') {
+  const response = await fetch(`/api/teams/${path}/${query}`, { credentials: 'same-origin', ...options })
   let data
   try { data = await response.json() } catch { throw new Error('Teams sign-in returned an unexpected response. Please try again.') }
   if (!response.ok) throw new Error(data.error || `Teams request failed (${response.status}).`)
@@ -43,20 +43,39 @@ export function exchangeTeamsToken(providerId, token, { graphOnly = false } = {}
 
 export function getTeamsConfig() { return request('config') }
 
-export async function registerTeamsConfigHandler(getProvider) {
+export async function getTeamsTabConfig() {
+  await initializeTeams()
+  const { pages } = await import('@microsoft/teams-js')
+  return pages.getConfig()
+}
+
+export function getTeamsCustomers(providerId) {
+  return request('customers', {}, `?provider=${encodeURIComponent(providerId)}`)
+}
+
+export function getTeamsCustomer(providerId, customerId) {
+  return request(`customers/${encodeURIComponent(customerId)}`, {}, `?provider=${encodeURIComponent(providerId)}`)
+}
+
+export async function registerTeamsConfigHandler(getSelection) {
   await initializeTeams()
   const { pages } = await import('@microsoft/teams-js')
   pages.config.setValidityState(false)
   pages.config.registerOnSaveHandler(async event => {
     try {
-      const provider = getProvider()
-      if (!provider) throw new Error('Select an organization before saving.')
-      const contentUrl = `${window.location.origin}/teams/tab/?provider=${encodeURIComponent(provider.id)}`
+      const { provider, customer } = getSelection() || {}
+      if (!provider || !customer) throw new Error('Sign in and select a customer before saving.')
+      await getTeamsCustomer(provider.id, customer.id)
+      const current = getSelection()
+      if (current?.provider?.id !== provider.id || current?.customer?.id !== customer.id) {
+        throw new Error('The selection changed. Save the tab again.')
+      }
+      const contentUrl = `${window.location.origin}/teams/customer/?provider=${encodeURIComponent(provider.id)}&customer=${encodeURIComponent(customer.id)}`
       await pages.config.setConfig({
-        entityId: `gather-tab-${provider.id}`,
+        entityId: `gather-customer-${provider.id}-${customer.id}`,
         contentUrl,
-        websiteUrl: window.location.origin,
-        suggestedDisplayName: 'Gather',
+        websiteUrl: `${window.location.origin}/#/contacts`,
+        suggestedDisplayName: `Gather · ${customer.name}`,
       })
       event.notifySuccess()
     } catch (error) {

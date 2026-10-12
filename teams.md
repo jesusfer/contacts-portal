@@ -102,10 +102,20 @@ responses. It does not expose tokens or secrets.
   `@microsoft/teams.graph-endpoints`. An `App` starts with explicit
   `User.Read`, `Calendars.Read`, `Mail.Read`, and `Presence.Read` prewarm scopes.
   `@microsoft/teams-js` remains responsible for portal SSO and tab configuration.
-- `/teams/tab/` is the content page for a personal static tab and configured
-  channel/group-chat tabs. It initializes Teams, requests the host user's SSO
-  token automatically, and uses the startup option above. `/teams/config/`
-  registers the Teams tab configuration/save handler.
+- `/teams/tab/` remains the personal static tab. It initializes Teams, requests
+  the host user's SSO token automatically, and uses the startup option above.
+- `/teams/config/` configures a separate channel/group-chat customer tab.
+  It always uses Teams SSO to establish a CRM session, loads CRM customers
+  (companies), and enables Save only after a customer is selected. A linked
+  active OIDC account and provisioned CRM agent are required, even when
+  `TEAMS_GRAPH_ONLY=1`. Existing selections are restored when reconfiguring.
+- `/teams/customer/?provider=<provider-id>&customer=<company-id>` is the
+  configured content page. Each viewer signs in with Teams SSO and sees that
+  customer's contacts and **their own** calls. The customer selection is shared,
+  but calls are never shared between agents. Refresh reloads CRM data; unknown
+  or deleted customers display an error rather than the full directory.
+  `/api/teams/customers/` and `/api/teams/customers/<company-id>/` require an
+  authenticated agent and a matching Teams SSO provider session.
 - Providers whose configured **ID** starts with `entraid`
   (case-insensitive) use delegated Graph access, including ordinary browser OIDC
   sessions. Other providers and local sign-ins keep the existing CRM behavior.
@@ -372,8 +382,10 @@ portal provider's `teams.resource`.
 Validate and zip the manifest/icons using Toolkit/Developer Portal, enable
 custom app upload in your Teams tenant, and upload the package. Add the personal
 app to test the static tab; use **Add a tab** in a channel/chat to test the
-configuration page and save its tab. Tabs still display the current user's
-workspace, not a shared channel mailbox or another user's calendar.
+configuration page, sign in, choose a customer, and save its tab. The static tab
+still displays the current user's Microsoft 365 workspace. The configurable tab
+displays the selected customer's CRM contacts and the current agent's calls,
+not a shared channel mailbox or another agent's calls.
 
 ## HTTPS, framing, and cookies
 
