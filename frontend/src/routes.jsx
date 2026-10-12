@@ -1,4 +1,3 @@
-import { WorkspaceApp } from './WorkspaceApp.jsx'
 import { Empty } from './components/Empty.jsx'
 import { AppointmentDetail } from './pages/AppointmentDetail.jsx'
 import { Calendar } from './pages/Calendar.jsx'
@@ -11,15 +10,9 @@ import { GraphInbox } from './pages/GraphInbox.jsx'
 import { Inbox } from './pages/Inbox.jsx'
 import { Login } from './pages/Login.jsx'
 import { Profile } from './pages/Profile.jsx'
-import { TeamsConfig } from './pages/TeamsConfig.jsx'
-import { TeamsCustomerTab } from './pages/TeamsCustomerTab.jsx'
-import { TeamsTab } from './pages/TeamsTab.jsx'
-
-export function AppRoutes() {
-  if (location.pathname === '/teams/config/') return <TeamsConfig/>
-  if (location.pathname === '/teams/customer/') return <TeamsCustomerTab/>
-  if (location.pathname === '/teams/tab/') return <TeamsTab/>
-  return <WorkspaceApp/>
+export function AppRoutes({ workspace, pages }) {
+  const Page = pages[location.pathname]
+  return Page ? <Page/> : workspace
 }
 
 export function WorkspaceRoutes({ session, section, id, props, profileRevision, refreshProfile, loadSession, setError }) {
