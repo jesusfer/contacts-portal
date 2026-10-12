@@ -1,4 +1,6 @@
 """Contact cards for the API-based Teams messaging extension."""
+from datetime import UTC
+
 from django.conf import settings
 from django.db.models import Prefetch, Q
 from django.http import JsonResponse
@@ -29,7 +31,7 @@ def call_history(calls):
     for call in calls:
         details = [f"Call #{call.pk}", call.get_status_display()]
         if hasattr(call, "appointment"):
-            details.append(call.appointment.starts_at.strftime("%Y-%m-%d %H:%M UTC"))
+            details.append(call.appointment.starts_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC"))
         if call.rating is not None:
             details.append(f"Rating: {call.rating}/5")
         summary = call.summary[:SUMMARY_LIMIT]
@@ -66,7 +68,7 @@ def search_contacts(request):
         return response({"error": "A linked, active CRM agent is required."}, 403)
 
     queries = request.GET.getlist("query")
-    if len(queries) != 1 or not 1 <= len(queries[0].strip()) <= 200:
+    if len(queries) != 1 or not queries[0].strip() or len(queries[0]) > 200:
         return response({"error": "query must contain between 1 and 200 characters."}, 400)
     contacts = Contact.objects.select_related("company")
     for term in queries[0].split():

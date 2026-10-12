@@ -266,6 +266,63 @@ recipients. Cards are snapshots and do not update after portal edits.
 Test the deployed bot in Teams by searching a customer (including one with no
 contacts), selecting it, and sending its card.
 
+## Teams API-based contact messaging extension
+
+The separate **Contact Cards** app uses the
+[Teams API-based messaging extension framework](https://learn.microsoft.com/en-us/microsoftteams/platform/messaging-extensions/api-based-overview),
+not a bot. Search by customer company name, contact name, or email; combine words
+to narrow results (for example, a customer name and a contact name). Select a
+contact to insert an Adaptive Card into the compose box, then send it to the chat.
+Each card contains the contact name, email, customer, and your latest three call
+records, newest ID first (the existing CRM call ordering). Call status, appointment
+time in UTC when available, rating when available, and summary are included.
+Scheduled calls remain call records; this is not a list of only completed calls.
+Contacts with fewer than three calls show all available records; contacts without
+calls show **No calls recorded**. Summaries over 200 characters are explicitly
+shortened to keep cards bounded.
+
+1. Configure an existing `entraid`-prefixed OIDC provider's `teams` settings and
+   Entra registration as described under **Combined Teams app manifest and SSO**
+   above: v2 access tokens, the `access_as_user` delegated scope, matching audience
+   and resource, and both authorized Teams clients. Set `TEAMS_API_PROVIDER_ID`
+   to that provider's ID in the portal environment (Compose passes it through).
+   This extension does not require any `TEAMS_BOT_*` settings or Graph token exchange.
+2. Each user must first sign in through that OIDC provider to link their Entra
+   object/tenant identity to an active account, and have a provisioned **Agent**.
+   The API validates the delegated bearer token; browser session cookies are not
+   accepted as authorization. Missing configuration returns HTTP 503, invalid or
+   missing tokens return 401, and unlinked/inactive/unprovisioned users return 403.
+3. Customize `teams/api-manifest.json` and `teams/contact-search-openapi.json`.
+   Replace `<PORTAL_HOST>` in both files with the public HTTPS hostname and
+   `<TEAMS_SSO_APP_ID>` with the configured provider's client ID. Give
+   `<TEAMS_API_APP_ID>` a new stable Teams app UUID, different from the existing
+   bot/tab app ID. Set real developer, privacy, and terms URLs.
+4. Package the customized `api-manifest.json` **renamed to `manifest.json`**,
+   `contact-search-openapi.json`, `contact-card-template.json`, `color.png`, and
+   `outline.png` together at the ZIP archive root. Upload through Teams **Manage
+   your apps → Upload an app** or your organization's catalog. Do not include the
+   existing bot manifest: Teams supports only one compose extension per app.
+   The original `teams/manifest.json`, bot endpoint, and tabs remain unchanged.
+
+The minimal OpenAPI 3.0.1 definition describes only
+`GET /api/teams/contact-search/?query=...`, with one required search parameter,
+bearer authentication, and the JSON fields used by the rendering template.
+Teams calls this endpoint directly and renders its `contacts` array using the
+packaged preview and Adaptive Card templates; no select-item bot invoke is used.
+Queries accept 1–200 characters, cannot be whitespace-only, and return up to 25 contacts in
+name/ID order. All search words must match across the customer, contact name,
+or email. Refine the query if the desired contact is outside the first 25 results.
+The directory is shared, but call history is limited to the requesting agent's
+records for each contact. No other agents' calls, appointment notes, inbox data,
+credentials, or Graph tokens are returned. Responses are private and not cached.
+
+**Sending a card shares its contact details and call summaries with everyone in
+the conversation, including external participants.** Share only with authorized
+recipients. Cards are snapshots, not live updates. After deployment, test customer
+and contact searches, empty results, contacts with zero/fewer/more than three
+calls, and two agents with different call histories; verify that selecting and
+sending a result shows only the requesting agent's latest three records.
+
 ## User profiles
 
 For Microsoft Teams static/configurable tabs, automatic SSO, and delegated

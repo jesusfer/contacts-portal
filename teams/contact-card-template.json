@@ -1,0 +1,50 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.19/MicrosoftTeams.ResponseRenderingTemplate.schema.json",
+  "version": "1.0",
+  "jsonPath": "contacts",
+  "responseLayout": "list",
+  "responseCardTemplate": {
+    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+    "type": "AdaptiveCard",
+    "version": "1.3",
+    "body": [
+      {
+        "type": "TextBlock",
+        "text": "${name}",
+        "weight": "Bolder",
+        "size": "Large",
+        "wrap": true
+      },
+      {
+        "type": "FactSet",
+        "facts": [
+          {
+            "title": "Customer",
+            "value": "${customer}"
+          },
+          {
+            "title": "Email",
+            "value": "${email}"
+          }
+        ]
+      },
+      {
+        "type": "TextBlock",
+        "text": "Last three calls",
+        "weight": "Bolder",
+        "separator": true,
+        "wrap": true
+      },
+      {
+        "type": "TextBlock",
+        "text": "${calls}",
+        "wrap": true
+      }
+    ]
+  },
+  "previewCardTemplate": {
+    "title": "${name}",
+    "subtitle": "${customer}",
+    "text": "${email}"
+  }
+}
