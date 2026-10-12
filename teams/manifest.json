@@ -11,18 +11,34 @@
     "termsOfUseUrl": "https://<PORTAL_HOST>/terms"
   },
   "name": {
-    "short": "Customer search",
-    "full": "Contacts Portal customer search"
+    "short": "Contacts Portal",
+    "full": "Contacts Portal for Microsoft Teams"
   },
   "description": {
-    "short": "Share customer contacts in Teams.",
-    "full": "Search the Contacts Portal customer directory and insert an Adaptive Card with customer details and contacts into a conversation."
+    "short": "Your workspace, customer tabs, and contact sharing in Teams.",
+    "full": "Open your personal workspace, configure customer tabs in teams and chats, or search the Contacts Portal customer directory and share an Adaptive Card with customer details and contacts."
   },
   "icons": {
     "color": "color.png",
     "outline": "outline.png"
   },
   "accentColor": "#FFFFFF",
+  "staticTabs": [
+    {
+      "entityId": "contacts-portal",
+      "name": "Gather",
+      "contentUrl": "https://<PORTAL_HOST>/teams/tab/?provider=<TEAMS_OIDC_PROVIDER_ID>",
+      "websiteUrl": "https://<PORTAL_HOST>/",
+      "scopes": ["personal"]
+    }
+  ],
+  "configurableTabs": [
+    {
+      "configurationUrl": "https://<PORTAL_HOST>/teams/config/",
+      "canUpdateConfiguration": true,
+      "scopes": ["team", "groupChat"]
+    }
+  ],
   "composeExtensions": [
     {
       "botId": "<TEAMS_BOT_APP_ID>",
@@ -45,5 +61,9 @@
       ]
     }
   ],
-  "validDomains": ["<PORTAL_HOST>"]
+  "validDomains": ["<PORTAL_HOST>"],
+  "webApplicationInfo": {
+    "id": "<TEAMS_SSO_APP_ID>",
+    "resource": "api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>"
+  }
 }

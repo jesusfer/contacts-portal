@@ -276,11 +276,38 @@ class MessagingExtensionTests(TestCase):
 
 
 class MessagingExtensionManifestTests(SimpleTestCase):
+    def manifest(self):
+        return json.loads((Path(settings.BASE_DIR) / "teams" / "manifest.json").read_text())
+
     def test_manifest_matches_handler(self):
-        manifest = json.loads((Path(settings.BASE_DIR) / "teams" / "manifest.json").read_text())
+        manifest = self.manifest()
         extension, = manifest["composeExtensions"]
         command, = extension["commands"]
         self.assertEqual(command["id"], COMMAND_ID)
         self.assertEqual(command["type"], "query")
         self.assertIn("compose", command["context"])
         self.assertEqual(command["parameters"][0]["name"], "searchText")
+
+    def test_manifest_includes_existing_tab_routes(self):
+        manifest = self.manifest()
+        personal, = manifest["staticTabs"]
+        self.assertEqual(personal["scopes"], ["personal"])
+        self.assertEqual(
+            personal["contentUrl"],
+            "https://<PORTAL_HOST>/teams/tab/?provider=<TEAMS_OIDC_PROVIDER_ID>",
+        )
+        self.assertEqual(personal["websiteUrl"], "https://<PORTAL_HOST>/")
+        configurable, = manifest["configurableTabs"]
+        self.assertEqual(configurable["configurationUrl"], "https://<PORTAL_HOST>/teams/config/")
+        self.assertEqual(configurable["scopes"], ["team", "groupChat"])
+        self.assertTrue(configurable["canUpdateConfiguration"])
+
+    def test_manifest_sso_uses_portal_application_not_bot_application(self):
+        manifest = self.manifest()
+        self.assertEqual(manifest["webApplicationInfo"], {
+            "id": "<TEAMS_SSO_APP_ID>",
+            "resource": "api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>",
+        })
+        self.assertEqual(manifest["id"], "<TEAMS_APP_ID>")
+        self.assertEqual(manifest["composeExtensions"][0]["botId"], "<TEAMS_BOT_APP_ID>")
+        self.assertEqual(manifest["validDomains"], ["<PORTAL_HOST>"])

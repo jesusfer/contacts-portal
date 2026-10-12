@@ -208,14 +208,48 @@ then send it. No calls, appointments, inbox records, or Graph tokens are shared.
    verified Bot Framework channel identity, not browser session cookies, email
    matching, or Graph permissions. Unlinked or unprovisioned users receive an
    authorization error; sign in to the portal and retry.
-4. Customize `teams/manifest.json`: replace `<TEAMS_APP_ID>` with a new Teams app
-   UUID, `<TEAMS_BOT_APP_ID>` with the bot client ID, and `<PORTAL_HOST>` with
-   your public hostname. Set real developer, privacy, and terms URLs (the portal
+4. Customize `teams/manifest.json` using the placeholders below. Set real
+   developer, privacy, and terms URLs (the portal
    does not provide privacy/terms pages). Supply your app's `color.png` (192×192)
    and transparent white `outline.png` (32×32). Zip the manifest and both icons
    at the archive root, then upload the package through Teams **Manage your
-   apps → Upload an app** or your organization's app catalog. To add this command
-   to an existing tab app, merge `composeExtensions` into its manifest instead.
+   apps → Upload an app** or your organization's app catalog. To add these features
+   to an existing app, merge `staticTabs`, `configurableTabs`, `composeExtensions`,
+   and `webApplicationInfo` into its manifest instead.
+
+### Combined Teams app manifest and SSO
+
+The manifest includes the **Gather** personal static tab at `/teams/tab/`,
+configurable customer tabs for teams and group chats at `/teams/config/`, and
+the customer search messaging extension. Tab configuration selects the provider
+and customer and saves a `/teams/customer/` content URL.
+
+Replace every occurrence of these explicit placeholder variables before
+packaging; Teams does **not** substitute them automatically:
+
+| Manifest placeholder | Replacement |
+| --- | --- |
+| `<TEAMS_APP_ID>` | The Teams app's unique UUID (keep it stable when updating an installed app) |
+| `<PORTAL_HOST>` | Public HTTPS portal hostname, without a scheme or trailing slash |
+| `<TEAMS_BOT_APP_ID>` | Bot registration client ID, matching `TEAMS_BOT_APP_ID` |
+| `<TEAMS_SSO_APP_ID>` | Portal Entra/OIDC application client ID, matching the selected provider's `client_id`; not the bot ID unless both registrations intentionally share an application |
+| `<TEAMS_OIDC_PROVIDER_ID>` | The selected `entraid`-prefixed `OIDC_PROVIDERS` provider `id`, also matching `TEAMS_BOT_PROVIDER_ID` for this single-tenant app |
+
+For tab SSO, configure that OIDC provider's `teams` settings with `tenant_id`
+matching its issuer, `audience` equal to `<TEAMS_SSO_APP_ID>`, and `resource`
+exactly `api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>`. The manifest's
+`webApplicationInfo.id` and `.resource` must match those values.
+In the portal's Entra app registration, set the same Application ID URI under
+**Expose an API**, expose the delegated `access_as_user` scope, and authorize the
+Teams desktop/mobile client `1fec8e78-bce4-4aaf-ab1b-5451cc387264` and web client
+`5e3ce6c0-2b1f-4285-8d4b-75ee78787346` for that scope. Configure v2 access tokens
+(`api.requestedAccessTokenVersion: 2`) and grant the delegated Graph permissions
+used by the portal (`User.Read`, `Calendars.Read`, `Mail.Read`, `Presence.Read`).
+Retain the provider's browser OIDC callback and client-secret configuration.
+Use production HTTPS, secure cookies, and the portal's existing Teams settings.
+The SSO entry enables the tabs; bot invokes still use their separate Bot Framework
+channel authentication. After upload, verify the personal tab signs in and a
+customer tab can be configured in a team or group chat.
 
 The extension is disabled (HTTP 503) unless all four bot settings are present.
 It always requires a signed Bot Framework channel bearer token, including in
