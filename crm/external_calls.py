@@ -11,12 +11,15 @@ import requests
 logger = logging.getLogger("crm.external_calls")
 
 
-def _response_id(response, header):
-    value = response.headers.get(header)
-    try:
-        return str(UUID(value)) if isinstance(value, str) else "-"
-    except ValueError:
-        return "-"
+def _response_id(response, *headers):
+    for header in headers:
+        value = response.headers.get(header)
+        try:
+            if isinstance(value, str):
+                return str(UUID(value))
+        except ValueError:
+            pass
+    return "-"
 
 
 def logged_request(send, url, *, service, operation, method, **kwargs):
@@ -42,8 +45,8 @@ def logged_request(send, url, *, service, operation, method, **kwargs):
         "external_call.complete %s status=%s duration_ms=%.1f "
         "request_id=%s correlation_id=%s",
         context, response.status_code, (monotonic() - started) * 1000,
-        _response_id(response, "request-id"),
-        _response_id(response, "client-request-id"),
+        _response_id(response, "request-id", "x-ms-request-id"),
+        _response_id(response, "client-request-id", "x-ms-correlation-id"),
     )
     return response
 

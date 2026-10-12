@@ -40,7 +40,11 @@ class GraphClient:
             response = logged_request(
                 requests.get,
                 f"{self.GRAPH_BASE}{endpoint}",
-                service="graph", operation=endpoint, method="GET",
+                service="graph",
+                operation=endpoint if endpoint in {
+                    "/me", "/me/calendarView", "/me/mailFolders/inbox/messages", "/me/presence",
+                } else "http_request",
+                method="GET",
                 headers={
                     "Authorization": "Bearer " + self.access_token,
                     "Accept": "application/json",

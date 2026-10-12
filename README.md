@@ -71,7 +71,8 @@ mode is disabled. Follow them with `docker compose logs -f portal`.
 Each outbound call has matching `external_call.start` and
 `external_call.complete` (or `external_call.failed`) entries with a unique
 `call_id`, service, operation, method, hostname, elapsed milliseconds and HTTP
-status. Microsoft `request-id` and `client-request-id` response headers are
+status. Microsoft `request-id` and `client-request-id` response headers
+(falling back to `x-ms-request-id` and `x-ms-correlation-id`) are
 included only when they are valid UUIDs, for upstream troubleshooting.
 HTTP non-success responses and transport failures are warnings; failures
 include the exception type, never its potentially sensitive message.
