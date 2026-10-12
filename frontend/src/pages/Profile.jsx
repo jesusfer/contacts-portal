@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { api, useResource } from '../lib/data.js'
+import { api, useResource } from '../utils/data.js'
 import { ErrorNotice } from '../components/ErrorNotice.jsx'
 import { Loading } from '../components/Loading.jsx'
 import { PageHeading } from '../components/PageHeading.jsx'

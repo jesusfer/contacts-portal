@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'preact/hooks'
-import { api, date } from './lib/data.js'
+import { api, date } from './utils/data.js'
 import { Dialog } from './components/Dialog.jsx'
 import { ErrorNotice } from './components/ErrorNotice.jsx'
 import { GraphPresenceIndicator } from './components/GraphPresenceIndicator.jsx'
 import { Icon } from './components/Icon.jsx'
 import { Loading } from './components/Loading.jsx'
 import { UserAvatar } from './components/UserAvatar.jsx'
+import { CreateForm } from './pages/CreateForm.jsx'
+import { Login } from './pages/Login.jsx'
 import { WorkspaceRoutes } from './routes.jsx'
 
 const labels = { dashboard: 'Overview', calls: 'Call log', calendar: 'Calendar', contacts: 'Contacts', inbox: 'Inbox', appointments: 'Appointment', profile: 'My profile', access: 'Workspace access' }
@@ -36,7 +38,7 @@ export function WorkspaceApp({ initialSession = null, embedded = false, onSessio
   if (!session.user) return embedded ? <ErrorNotice error="Your Teams session has ended. Reload this tab to sign in again."/> : <Login session={session} onLogin={loadSession}/>
   const parts = route.split('/').filter(Boolean), section = !session.agent && parts[0] !== 'profile' ? 'access' : parts[0] || 'dashboard', id = /^\d+$/.test(parts[1] || '') ? parts[1] : null
   const props = {version,refresh,openCreate}
-  const page = <WorkspaceRoutes session={session} section={section} id={id} props={props} profileRevision={profileRevision} refreshProfile={refreshProfile} loadSession={loadSession}/>
+  const page = <WorkspaceRoutes session={session} section={section} id={id} props={props} profileRevision={profileRevision} refreshProfile={refreshProfile} loadSession={loadSession} setError={setError}/>
   return <>
     <a class="skip-link" href="#main-content" onClick={e => {e.preventDefault();document.getElementById('main-content').focus()}}>Skip to content</a>
     <div class="shell">

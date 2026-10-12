@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import * as TeamsGraph from '../teams-graph.js'
-import { initials } from '../lib/data.js'
+import { initials } from '../utils/data.js'
 export function UserAvatar({ user, revision, large = false }) {
   const [failedSource, setFailedSource] = useState('')
   const [graphPhoto, setGraphPhoto] = useState('')

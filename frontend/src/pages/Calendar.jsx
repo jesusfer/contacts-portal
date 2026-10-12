@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks'
-import { date, dateTime, time, useResource } from '../lib/data.js'
+import { date, dateTime, time, useResource } from '../utils/data.js'
 import { AppointmentRow } from '../components/AppointmentRow.jsx'
 import { Empty } from '../components/Empty.jsx'
 import { ErrorNotice } from '../components/ErrorNotice.jsx'

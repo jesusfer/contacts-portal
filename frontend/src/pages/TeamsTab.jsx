@@ -4,7 +4,7 @@ import * as TeamsGraph from '../teams-graph.js'
 import { ErrorNotice } from '../components/ErrorNotice.jsx'
 import { Loading } from '../components/Loading.jsx'
 import { initialProvider, ProviderSelect } from '../teams/selection.jsx'
-import { WorkspaceApp } from '../App.jsx'
+import { WorkspaceApp } from '../WorkspaceApp.jsx'
 import { TeamsGraphWorkspace } from './TeamsGraphWorkspace.jsx'
 
 export function TeamsTab() {

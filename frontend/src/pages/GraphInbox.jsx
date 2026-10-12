@@ -1,5 +1,5 @@
 import { useGraphPages } from '../hooks/useGraphPages.js'
-import { dateTime, initials } from '../lib/data.js'
+import { dateTime, initials } from '../utils/data.js'
 import { Badge } from '../components/Badge.jsx'
 import { Empty } from '../components/Empty.jsx'
 import { GraphLink } from '../components/GraphLink.jsx'

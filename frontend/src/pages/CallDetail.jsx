@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
-import { api, date, dateTime, time, useResource } from '../lib/data.js'
+import { api, date, dateTime, time, useResource } from '../utils/data.js'
 import { Badge } from '../components/Badge.jsx'
 import { CallFields } from '../components/CallFields.jsx'
 import { Contact } from '../components/Contact.jsx'

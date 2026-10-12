@@ -1,4 +1,4 @@
-import { api, date, initials, useResource } from '../lib/data.js'
+import { api, date, initials, useResource } from '../utils/data.js'
 import { AppointmentRow } from '../components/AppointmentRow.jsx'
 import { Badge } from '../components/Badge.jsx'
 import { Empty } from '../components/Empty.jsx'

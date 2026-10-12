@@ -1,5 +1,3 @@
-import { useState } from 'preact/hooks'
-
 export function initialProvider(providers) {
   const query = new URLSearchParams(location.search)
   if (query.has('provider')) {

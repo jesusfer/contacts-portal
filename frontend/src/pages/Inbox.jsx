@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
-import { api, date, dateTime, useResource } from '../lib/data.js'
+import { api, date, dateTime, useResource } from '../utils/data.js'
 import { Badge } from '../components/Badge.jsx'
 import { Empty } from '../components/Empty.jsx'
 import { ErrorNotice } from '../components/ErrorNotice.jsx'

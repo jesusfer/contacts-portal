@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks'
-import { api, appointmentPayload, statuses, useResource } from '../lib/data.js'
+import { api, appointmentPayload, statuses, useResource } from '../utils/data.js'
 import { AppointmentFields } from '../components/AppointmentFields.jsx'
 import { CallFields } from '../components/CallFields.jsx'
 import { Empty } from '../components/Empty.jsx'

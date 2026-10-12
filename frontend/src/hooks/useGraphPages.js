@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { api } from '../lib/data.js'
+import { api } from '../utils/data.js'
 
 export function useGraphPages(path, field, version) {
   const [state, setState] = useState({ path, items: [], next: null, loading: true, error: '' })

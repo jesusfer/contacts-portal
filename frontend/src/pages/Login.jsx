@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks'
-import { api } from '../lib/data.js'
+import { api } from '../utils/data.js'
 import { ErrorNotice } from '../components/ErrorNotice.jsx'
 import { Icon } from '../components/Icon.jsx'
 

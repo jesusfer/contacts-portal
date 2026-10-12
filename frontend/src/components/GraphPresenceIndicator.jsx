@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
-import { api } from '../lib/data.js'
+import { api } from '../utils/data.js'
 export function GraphPresenceIndicator({ user }) {
   const [presence, setPresence] = useState({ availability: 'Unknown', activity: '' })
   useEffect(() => {

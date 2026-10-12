@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks'
-import { useResource } from '../lib/data.js'
+import { useResource } from '../utils/data.js'
 import { Contact } from '../components/Contact.jsx'
 import { Empty } from '../components/Empty.jsx'
 import { ErrorNotice } from '../components/ErrorNotice.jsx'

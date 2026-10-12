@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks'
-import { dateTime, statuses, useResource } from '../lib/data.js'
+import { dateTime, statuses, useResource } from '../utils/data.js'
 import { Contact } from '../components/Contact.jsx'
 import { Badge } from '../components/Badge.jsx'
 import { Empty } from '../components/Empty.jsx'

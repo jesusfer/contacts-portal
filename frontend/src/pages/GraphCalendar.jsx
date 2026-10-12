@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks'
 import { useGraphPages } from '../hooks/useGraphPages.js'
-import { dateTime } from '../lib/data.js'
+import { dateTime } from '../utils/data.js'
 import { Empty } from '../components/Empty.jsx'
 import { GraphLink } from '../components/GraphLink.jsx'
 import { GraphPagination } from '../components/GraphPagination.jsx'

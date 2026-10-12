@@ -22,10 +22,10 @@ export function AppRoutes() {
   return <WorkspaceApp/>
 }
 
-export function WorkspaceRoutes({ session, section, id, props, profileRevision, refreshProfile, loadSession }) {
+export function WorkspaceRoutes({ session, section, id, props, profileRevision, refreshProfile, loadSession, setError }) {
   if (!session.user) return <Login session={session} onLogin={loadSession}/>
   if (section === 'profile') return <Profile key={session.user.id} user={session.user} revision={profileRevision} onUpdate={refreshProfile}/>
-  if (!session.agent) return <div class="provision"><div class="eyebrow">You're signed in</div><h1>Your workspace is on its way.</h1><p class="muted">Your account is not linked to an agent workspace yet. Ask your administrator to provision your access, then check again.</p><div class="actions" style="margin-top:25px;justify-content:center"><button class="button" onClick={() => loadSession().catch(() => {})}>Check access</button><a class="button secondary" href="#/profile">My profile</a></div></div>
+  if (!session.agent) return <div class="provision"><div class="eyebrow">You're signed in</div><h1>Your workspace is on its way.</h1><p class="muted">Your account is not linked to an agent workspace yet. Ask your administrator to provision your access, then check again.</p><div class="actions" style="margin-top:25px;justify-content:center"><button class="button" onClick={() => loadSession().catch(error => setError(error.message))}>Check access</button><a class="button secondary" href="#/profile">My profile</a></div></div>
   if (section === 'dashboard') return <Dashboard user={session.user} {...props}/>
   if (section === 'calls') return id ? <CallDetail key={id} id={id} {...props}/> : <Calls {...props}/>
   if (section === 'appointments' && id) return <AppointmentDetail key={id} id={id} {...props}/>
