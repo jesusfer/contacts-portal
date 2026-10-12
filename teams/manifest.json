@@ -1,0 +1,49 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.19",
+  "version": "1.0.0",
+  "id": "<TEAMS_APP_ID>",
+  "packageName": "com.contactsportal.customers",
+  "developer": {
+    "name": "Contacts Portal",
+    "websiteUrl": "https://<PORTAL_HOST>",
+    "privacyUrl": "https://<PORTAL_HOST>/privacy",
+    "termsOfUseUrl": "https://<PORTAL_HOST>/terms"
+  },
+  "name": {
+    "short": "Customer search",
+    "full": "Contacts Portal customer search"
+  },
+  "description": {
+    "short": "Share customer contacts in Teams.",
+    "full": "Search the Contacts Portal customer directory and insert an Adaptive Card with customer details and contacts into a conversation."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#FFFFFF",
+  "composeExtensions": [
+    {
+      "botId": "<TEAMS_BOT_APP_ID>",
+      "canUpdateConfiguration": false,
+      "commands": [
+        {
+          "id": "searchCustomers",
+          "type": "query",
+          "title": "Search customers",
+          "description": "Search customers by company name.",
+          "context": ["compose", "commandBox"],
+          "parameters": [
+            {
+              "name": "searchText",
+              "title": "Customer name",
+              "description": "Enter all or part of a customer company name."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "validDomains": ["<PORTAL_HOST>"]
+}

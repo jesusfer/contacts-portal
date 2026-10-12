@@ -183,6 +183,53 @@ Sessions created before source tracking was introduced display Local until
 the next sign-in. If the active provider is removed from configuration, the
 dashboard displays OIDC rather than guessing a provider name.
 
+## Teams customer messaging extension
+
+The Python Bot Framework endpoint at `/api/teams/messages/` lets provisioned
+agents search customer company names and insert an Adaptive Card containing
+the company name, customer ID, contact count, and contact names/emails into
+a Teams conversation. Select a search result to add it to the compose box,
+then send it. No calls, appointments, inbox records, or Graph tokens are shared.
+
+1. Register a **single-tenant Azure Bot** with a client-secret credential, enable
+   its **Microsoft Teams** channel, and set its HTTPS messaging endpoint to
+   `https://<portal-host>/api/teams/messages/`. The bot registration can be
+   separate from the portal's OIDC application.
+2. Configure these environment variables (Compose passes them to the portal):
+   - `TEAMS_BOT_APP_ID`: the bot's Microsoft application/client ID.
+   - `TEAMS_BOT_APP_PASSWORD`: its client-secret **value**, kept only in private
+     environment configuration; never include it in the Teams app package.
+   - `TEAMS_BOT_TENANT_ID`: the allowed Entra tenant UUID.
+   - `TEAMS_BOT_PROVIDER_ID`: an existing `entraid`-prefixed `OIDC_PROVIDERS`
+     provider ID whose issuer accepts that tenant.
+3. Each user must first sign in to the portal through that OIDC provider so
+   their Entra object/tenant identity is linked to an active local account.
+   An administrator must provision their **Agent**. The extension uses the
+   verified Bot Framework channel identity, not browser session cookies, email
+   matching, or Graph permissions. Unlinked or unprovisioned users receive an
+   authorization error; sign in to the portal and retry.
+4. Customize `teams/manifest.json`: replace `<TEAMS_APP_ID>` with a new Teams app
+   UUID, `<TEAMS_BOT_APP_ID>` with the bot client ID, and `<PORTAL_HOST>` with
+   your public hostname. Set real developer, privacy, and terms URLs (the portal
+   does not provide privacy/terms pages). Supply your app's `color.png` (192×192)
+   and transparent white `outline.png` (32×32). Zip the manifest and both icons
+   at the archive root, then upload the package through Teams **Manage your
+   apps → Upload an app** or your organization's app catalog. To add this command
+   to an existing tab app, merge `composeExtensions` into its manifest instead.
+
+The extension is disabled (HTTP 503) unless all four bot settings are present.
+It always requires a signed Bot Framework channel bearer token, including in
+debug mode; the Bot Framework Emulator is deliberately not accepted.
+Search is case-insensitive, returns up to five results per page, and accepts
+up to 200 characters. Cards show up to 20 contacts and are size-bounded for
+Teams; any omitted contacts are explicitly noted. Companies and contacts use
+the existing shared directory, not the agent's company memberships.
+Sending a card shares its contents with everyone in that conversation,
+including external participants; only share customer data with authorized
+recipients. Cards are snapshots and do not update after portal edits.
+Test the deployed bot in Teams by searching a customer (including one with no
+contacts), selecting it, and sending its card.
+
 ## User profiles
 
 For Microsoft Teams static/configurable tabs, automatic SSO, and delegated
