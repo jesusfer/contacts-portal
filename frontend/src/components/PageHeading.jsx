@@ -1,0 +1,1 @@
+export function PageHeading({ eyebrow = 'Your workspace', title, subtitle, children }) { return <div class="page-heading"><div><div class="eyebrow">{eyebrow}</div><h1>{title}</h1><p class="muted">{subtitle}</p></div>{children}</div> }
