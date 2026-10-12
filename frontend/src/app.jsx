@@ -204,8 +204,8 @@ function initialProvider(providers) {
   return providers.length === 1 ? String(providers[0].id) : ''
 }
 
-function ProviderSelect({ providers, selected, onChange }) {
-  return <label class="teams-provider">Organization<select value={selected} onChange={event => onChange(event.target.value)}><option value="">Select an organization</option>{providers.map(provider => <option key={provider.id} value={String(provider.id)}>{provider.name}</option>)}</select></label>
+function ProviderSelect({ providers, selected, onChange, disabled = false }) {
+  return <label class="teams-provider">Organization<select disabled={disabled} value={selected} onChange={event => onChange(event.target.value)}><option value="">Select an organization</option>{providers.map(provider => <option key={provider.id} value={String(provider.id)}>{provider.name}</option>)}</select></label>
 }
 
 function TeamsTab() {
@@ -364,7 +364,7 @@ function TeamsConfig() {
   useEffect(() => {
     validity.current?.(!!selectionRef.current?.provider && !!selectionRef.current?.customer)
   }, [loading, signingIn, error, selected, providers, customers, customerId, authenticatedProvider])
-  return <div class="teams-page"><div class="teams-container"><h2>Gather customer tab</h2><p class="muted">Sign in with Teams, choose a CRM customer, then click Save. Calls are private to the signed-in agent.</p><ProviderSelect providers={providers} selected={selected} onChange={value => { validity.current?.(false); selectionRef.current = null; setCustomerId(''); setSelected(value) }}/>{loading || signingIn ? <Loading/> : <><ErrorNotice error={error} retry={() => setAttempt(n => n + 1)}/>{authenticatedProvider === selected && selected && !error && <label class="teams-provider">Customer<select value={customerId} onChange={event => setCustomerId(event.target.value)}><option value="">Select a customer</option>{customers.map(customer => <option key={customer.id} value={String(customer.id)}>{customer.name}</option>)}</select>{!customers.length && <p class="muted">No customers are available in the CRM.</p>}</label>}<a class="button secondary" href="/#/login" target="_blank" rel="noopener noreferrer">Open browser sign-in</a></>}</div></div>
+  return <div class="teams-page"><div class="teams-container"><h2>Gather customer tab</h2><p class="muted">Sign in with Teams, choose a CRM customer, then click Save. Calls are private to the signed-in agent.</p><ProviderSelect providers={providers} selected={selected} disabled={loading || signingIn} onChange={value => { validity.current?.(false); selectionRef.current = null; setCustomerId(''); setSelected(value) }}/>{loading || signingIn ? <Loading/> : <><ErrorNotice error={error} retry={() => setAttempt(n => n + 1)}/>{authenticatedProvider === selected && selected && !error && <label class="teams-provider">Customer<select value={customerId} onChange={event => setCustomerId(event.target.value)}><option value="">Select a customer</option>{customers.map(customer => <option key={customer.id} value={String(customer.id)}>{customer.name}</option>)}</select>{!customers.length && <p class="muted">No customers are available in the CRM.</p>}</label>}<a class="button secondary" href="/#/login" target="_blank" rel="noopener noreferrer">Open browser sign-in</a></>}</div></div>
 }
 
 function TeamsCustomerTab() {
