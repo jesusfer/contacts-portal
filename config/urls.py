@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import include, path, re_path
 
 from crm import views
+from crm.messaging_extension import messages
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -32,6 +33,7 @@ urlpatterns = [
     path("api/teams/identity/", views.teams_identity),
     path("api/teams/customers/", views.teams_customers),
     path("api/teams/customers/<int:pk>/", views.teams_customer),
+    path("api/teams/messages/", messages),
     re_path(r"^(?:api|accounts|admin|static|media)(?:/|$)", views.not_found),
     re_path(r"^.*$", views.spa),
 ]

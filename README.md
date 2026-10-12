@@ -183,6 +183,89 @@ Sessions created before source tracking was introduced display Local until
 the next sign-in. If the active provider is removed from configuration, the
 dashboard displays OIDC rather than guessing a provider name.
 
+## Teams customer messaging extension
+
+The Python Bot Framework endpoint at `/api/teams/messages/` lets provisioned
+agents search customer company names and insert an Adaptive Card containing
+the company name, customer ID, contact count, and contact names/emails into
+a Teams conversation. Select a search result to add it to the compose box,
+then send it. No calls, appointments, inbox records, or Graph tokens are shared.
+
+1. Register a **single-tenant Azure Bot** with a client-secret credential, enable
+   its **Microsoft Teams** channel, and set its HTTPS messaging endpoint to
+   `https://<portal-host>/api/teams/messages/`. The bot registration can be
+   separate from the portal's OIDC application.
+2. Configure these environment variables (Compose passes them to the portal):
+   - `TEAMS_BOT_APP_ID`: the bot's Microsoft application/client ID.
+   - `TEAMS_BOT_APP_PASSWORD`: its client-secret **value**, kept only in private
+     environment configuration; never include it in the Teams app package.
+   - `TEAMS_BOT_TENANT_ID`: the allowed Entra tenant UUID.
+   - `TEAMS_BOT_PROVIDER_ID`: an existing `entraid`-prefixed `OIDC_PROVIDERS`
+     provider ID whose issuer accepts that tenant.
+3. Each user must first sign in to the portal through that OIDC provider so
+   their Entra object/tenant identity is linked to an active local account.
+   An administrator must provision their **Agent**. The extension uses the
+   verified Bot Framework channel identity, not browser session cookies, email
+   matching, or Graph permissions. Unlinked or unprovisioned users receive an
+   authorization error; sign in to the portal and retry.
+4. Customize `teams/manifest.json` using the placeholders below. Set real
+   developer, privacy, and terms URLs (the portal
+   does not provide privacy/terms pages). The `teams/` directory includes the
+   manifest's Gather-branded `color.png` (192×192) and transparent white
+   `outline.png` (32×32). Zip the customized manifest and both bundled icons
+   at the archive root, then upload the package through Teams **Manage your
+   apps → Upload an app** or your organization's app catalog. To add these features
+   to an existing app, merge `staticTabs`, `configurableTabs`, `composeExtensions`,
+   and `webApplicationInfo` into its manifest instead.
+
+### Combined Teams app manifest and SSO
+
+The manifest includes the **Gather** personal static tab at `/teams/tab/`,
+configurable customer tabs for teams and group chats at `/teams/config/`, and
+the customer search messaging extension. Tab configuration selects the provider
+and customer and saves a `/teams/customer/` content URL.
+
+Replace every occurrence of these explicit placeholder variables before
+packaging; Teams does **not** substitute them automatically:
+
+| Manifest placeholder | Replacement |
+| --- | --- |
+| `<TEAMS_APP_ID>` | The Teams app's unique UUID (keep it stable when updating an installed app) |
+| `<PORTAL_HOST>` | Public HTTPS portal hostname, without a scheme or trailing slash |
+| `<TEAMS_BOT_APP_ID>` | Bot registration client ID, matching `TEAMS_BOT_APP_ID` |
+| `<TEAMS_SSO_APP_ID>` | Portal Entra/OIDC application client ID, matching the selected provider's `client_id`; not the bot ID unless both registrations intentionally share an application |
+| `<TEAMS_OIDC_PROVIDER_ID>` | The selected `entraid`-prefixed `OIDC_PROVIDERS` provider `id`, also matching `TEAMS_BOT_PROVIDER_ID` for this single-tenant app |
+
+For tab SSO, configure that OIDC provider's `teams` settings with `tenant_id`
+matching its issuer, `audience` equal to `<TEAMS_SSO_APP_ID>`, and `resource`
+exactly `api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>`. The manifest's
+`webApplicationInfo.id` and `.resource` must match those values.
+In the portal's Entra app registration, set the same Application ID URI under
+**Expose an API**, expose the delegated `access_as_user` scope, and authorize the
+Teams desktop/mobile client `1fec8e78-bce4-4aaf-ab1b-5451cc387264` and web client
+`5e3ce6c0-2b1f-4285-8d4b-75ee78787346` for that scope. Configure v2 access tokens
+(`api.requestedAccessTokenVersion: 2`) and grant the delegated Graph permissions
+used by the portal (`User.Read`, `Calendars.Read`, `Mail.Read`, `Presence.Read`).
+Retain the provider's browser OIDC callback and client-secret configuration.
+Use production HTTPS, secure cookies, and the portal's existing Teams settings.
+The SSO entry enables the tabs; bot invokes still use their separate Bot Framework
+channel authentication. After upload, verify the personal tab signs in and a
+customer tab can be configured in a team or group chat.
+
+The extension is disabled (HTTP 503) unless all four bot settings are present.
+It always requires a signed Bot Framework channel bearer token, including in
+debug mode; the Bot Framework Emulator is deliberately not accepted.
+Search is case-insensitive, honors Teams' requested page size (up to 25), and
+accepts up to 200 characters. Search results are lightweight previews; selecting
+a customer fetches its current details. Cards show up to 20 contacts and are size-bounded for
+Teams; any omitted contacts are explicitly noted. Companies and contacts use
+the existing shared directory, not the agent's company memberships.
+Sending a card shares its contents with everyone in that conversation,
+including external participants; only share customer data with authorized
+recipients. Cards are snapshots and do not update after portal edits.
+Test the deployed bot in Teams by searching a customer (including one with no
+contacts), selecting it, and sending its card.
+
 ## User profiles
 
 For Microsoft Teams static/configurable tabs, automatic SSO, and delegated

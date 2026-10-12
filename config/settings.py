@@ -161,6 +161,10 @@ TEAMS_ENABLED = any(
     for app in SOCIALACCOUNT_PROVIDERS["openid_connect"]["APPS"]
 )
 TEAMS_GRAPH_ONLY = os.environ.get("TEAMS_GRAPH_ONLY", "true").lower() in {"1", "true", "yes"}
+TEAMS_BOT_APP_ID = os.environ.get("TEAMS_BOT_APP_ID", "")
+TEAMS_BOT_APP_PASSWORD = os.environ.get("TEAMS_BOT_APP_PASSWORD", "")
+TEAMS_BOT_TENANT_ID = os.environ.get("TEAMS_BOT_TENANT_ID", "")
+TEAMS_BOT_PROVIDER_ID = os.environ.get("TEAMS_BOT_PROVIDER_ID", "")
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
