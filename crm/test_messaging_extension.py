@@ -92,6 +92,12 @@ class MessagingExtensionTests(TestCase):
             HTTP_AUTHORIZATION=" ".join(("Bearer", token or self.token())),
         )
 
+    def select(self, pk=None):
+        return self.post(self.activity(
+            name="composeExtension/selectItem",
+            value={"customer_id": self.company.pk if pk is None else pk},
+        ))
+
     def test_search_returns_insertable_adaptive_card_and_preview(self):
         response = self.post()
         self.assertEqual(response.status_code, 200)
@@ -99,9 +105,16 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(result["type"], "result")
         self.assertEqual(result["attachmentLayout"], "list")
         attachment, = result["attachments"]
+        self.assertEqual(attachment["contentType"], "application/vnd.microsoft.card.hero")
+        self.assertEqual(attachment["preview"]["content"]["title"], "Acme")
+        tap = attachment["preview"]["content"]["tap"]
+        self.assertEqual(tap, {"type": "invoke", "value": {"customer_id": self.company.pk}})
+        self.assertNotIn("alice@example", json.dumps(result))
+        response = self.select(tap["value"]["customer_id"])
+        self.assertEqual(response.status_code, 200)
+        attachment, = response.json()["composeExtension"]["attachments"]
         self.assertEqual(attachment["contentType"], "application/vnd.microsoft.card.adaptive")
         self.assertEqual(attachment["content"]["type"], "AdaptiveCard")
-        self.assertEqual(attachment["preview"]["content"]["title"], "Acme")
         content = json.dumps(attachment["content"])
         self.assertIn("Alice", content)
         self.assertIn("alice@example", content)
@@ -111,22 +124,26 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(self.agent.companies.count(), 0)
 
     def test_empty_query_no_matches_and_customer_without_contacts(self):
-        Company.objects.create(name="Empty customer")
+        empty = Company.objects.create(name="Empty customer")
         result = self.post(self.activity(text="missing")).json()["composeExtension"]
         self.assertEqual(result["attachments"], [])
-        result = self.post(self.activity(text="Empty")).json()["composeExtension"]
+        result = self.select(empty.pk).json()["composeExtension"]
         self.assertIn("No contacts recorded.", json.dumps(result))
         result = self.post(self.activity(text="  ")).json()["composeExtension"]
         self.assertEqual(len(result["attachments"]), 2)
 
     def test_results_are_ordered_paginated_and_bounded(self):
-        for index in range(10):
+        for index in range(30):
             Company.objects.create(name=f"Customer {index:02}")
         activity = self.activity(text="Customer")
-        activity["value"]["queryOptions"] = {"skip": 3, "count": 100}
+        activity["value"]["queryOptions"] = {"skip": 0, "count": PAGE_SIZE}
         attachments = self.post(activity).json()["composeExtension"]["attachments"]
         self.assertEqual(len(attachments), PAGE_SIZE)
-        self.assertEqual(attachments[0]["preview"]["content"]["title"], "Customer 03")
+        self.assertEqual(attachments[-1]["preview"]["content"]["title"], "Customer 24")
+        activity["value"]["queryOptions"]["skip"] = PAGE_SIZE
+        attachments = self.post(activity).json()["composeExtension"]["attachments"]
+        self.assertEqual(len(attachments), 5)
+        self.assertEqual(attachments[0]["preview"]["content"]["title"], "Customer 25")
 
     def test_contact_limit_and_markdown_escaping(self):
         self.company.name = "[Acme](https://untrusted.example)"
@@ -135,7 +152,7 @@ class MessagingExtensionTests(TestCase):
             Contact.objects.create(
                 name=f"Contact {index:02}", email=f"contact{index}@example.com", company=self.company,
             )
-        card = self.post(self.activity(text="Acme")).json()["composeExtension"]["attachments"][0]["content"]
+        card = self.select().json()["composeExtension"]["attachments"][0]["content"]
         self.assertIn("\\[Acme\\]", card["body"][0]["text"])
         self.assertEqual(len([block for block in card["body"] if block.get("separator")]), CONTACT_LIMIT)
         self.assertIn(f"Showing {CONTACT_LIMIT} of {CONTACT_LIMIT + 2}", card["body"][-1]["text"])
@@ -147,7 +164,7 @@ class MessagingExtensionTests(TestCase):
             Contact.objects.create(
                 name="界" * 195 + str(index), email="x" * 200 + "@example.com", company=self.company,
             )
-        card = self.post().json()["composeExtension"]["attachments"][0]["content"]
+        card = self.select().json()["composeExtension"]["attachments"][0]["content"]
         self.assertLessEqual(len(json.dumps(card).encode("utf-8")), CARD_BYTE_LIMIT)
         self.assertIn("Showing", card["body"][-1]["text"])
 
@@ -160,7 +177,8 @@ class MessagingExtensionTests(TestCase):
         ):
             with self.subTest(value=value):
                 self.assertEqual(self.post(self.activity(value=value)).status_code, 400)
-        for options in ("invalid", {"skip": -1}, {"skip": True}, {"skip": 10001}, {"count": 0}, {"count": "5"}):
+        for options in ("invalid", {"skip": -1}, {"skip": True}, {"skip": 10001},
+                        {"count": 0}, {"count": "5"}, {"count": PAGE_SIZE + 1}):
             activity = self.activity()
             activity["value"]["queryOptions"] = options
             with self.subTest(options=options):
@@ -216,12 +234,32 @@ class MessagingExtensionTests(TestCase):
 
     def test_other_channels_and_unsupported_invokes_are_rejected(self):
         self.assertEqual(self.post(self.activity(channelId="emulator")).status_code, 400)
-        self.assertEqual(self.post(self.activity(name="composeExtension/selectItem")).status_code, 501)
+        self.assertEqual(self.post(self.activity(name="composeExtension/submitAction")).status_code, 501)
+
+    def test_selection_rechecks_authorization_and_loads_current_details(self):
+        self.contact.name = "Updated contact"
+        self.contact.save()
+        self.assertIn("Updated contact", json.dumps(self.select().json()))
+        self.assertEqual(self.select(999999).status_code, 404)
+        for pk in ("1", True, -1, 2**63):
+            with self.subTest(pk=pk):
+                self.assertEqual(self.select(pk).status_code, 400)
+        self.user.is_active = False
+        self.user.save()
+        self.assertEqual(self.select().status_code, 403)
+
+    def test_search_payload_is_bounded_for_long_unicode_names(self):
+        for index in range(PAGE_SIZE):
+            Company.objects.create(name="😀" * 190 + str(index))
+        response = self.post(self.activity(text="😀"))
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(len(response.content), 100000)
 
     def test_disabled_and_http_input_validation(self):
         with override_settings(TEAMS_BOT_APP_PASSWORD=""):
             self.assertEqual(self.post().status_code, 503)
         self.assertEqual(self.client.get(ENDPOINT).status_code, 405)
+        self.assertEqual(self.post(self.activity(**{"from": "invalid"})).status_code, 400)
         for body in ("not-json", "[]"):
             self.assertEqual(self.client.post(
                 ENDPOINT, body, content_type="application/json",

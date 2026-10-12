@@ -220,8 +220,9 @@ then send it. No calls, appointments, inbox records, or Graph tokens are shared.
 The extension is disabled (HTTP 503) unless all four bot settings are present.
 It always requires a signed Bot Framework channel bearer token, including in
 debug mode; the Bot Framework Emulator is deliberately not accepted.
-Search is case-insensitive, returns up to five results per page, and accepts
-up to 200 characters. Cards show up to 20 contacts and are size-bounded for
+Search is case-insensitive, honors Teams' requested page size (up to 25), and
+accepts up to 200 characters. Search results are lightweight previews; selecting
+a customer fetches its current details. Cards show up to 20 contacts and are size-bounded for
 Teams; any omitted contacts are explicitly noted. Companies and contacts use
 the existing shared directory, not the agent's company memberships.
 Sending a card shares its contents with everyone in that conversation,
