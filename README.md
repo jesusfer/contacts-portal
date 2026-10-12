@@ -61,6 +61,28 @@ Credentials are used only for registry login, not passed into the image build.
 
 ## Local development
 
+### External-call tracing
+
+The backend logs Graph requests (including photos), Entra signing-key fetches,
+on-behalf-of exchanges and refreshes, and allauth OIDC discovery, token,
+userinfo and signing-key HTTP requests to the console, including when debug
+mode is disabled. Follow them with `docker compose logs -f portal`.
+
+Each outbound call has matching `external_call.start` and
+`external_call.complete` (or `external_call.failed`) entries with a unique
+`call_id`, service, operation, method, hostname, elapsed milliseconds and HTTP
+status. Microsoft `request-id` and `client-request-id` response headers are
+included only when they are valid UUIDs, for upstream troubleshooting.
+HTTP non-success responses and transport failures are warnings; failures
+include the exception type, never its potentially sensitive message.
+
+`EXTERNAL_CALL_LOG_LEVEL` defaults to `INFO`. Set it to `WARNING` to show only
+unsuccessful calls, or `ERROR` to silence this tracer. Request/response bodies,
+query strings, URL paths (except fixed Graph operation labels), credentials,
+authorization headers, cookies and personal profile/mail/calendar data are
+never logged. Tracing does not enable verbose logging in HTTP libraries or
+the Bot Framework SDK.
+
 Requires Python 3.12+ and Node.js 22.12+.
 
 ```

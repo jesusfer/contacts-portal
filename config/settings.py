@@ -20,6 +20,26 @@ TEAMS_CLIENT_IDS = [
     "5e3ce6c0-2b1f-4285-8d4b-75ee78787346",
 ]
 DEBUG = os.environ.get("DJANGO_DEBUG", os.environ.get("DEBUG", "true")).lower() in {"1", "true", "yes"}
+EXTERNAL_CALL_LOG_LEVEL = os.environ.get("EXTERNAL_CALL_LOG_LEVEL", "INFO").upper()
+if EXTERNAL_CALL_LOG_LEVEL not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+    raise ImproperlyConfigured("EXTERNAL_CALL_LOG_LEVEL must be a standard logging level.")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "external_calls": {"format": "{asctime} {levelname} {name} {message}", "style": "{"},
+    },
+    "handlers": {
+        "external_calls_console": {"class": "logging.StreamHandler", "formatter": "external_calls"},
+    },
+    "loggers": {
+        "crm.external_calls": {
+            "handlers": ["external_calls_console"],
+            "level": EXTERNAL_CALL_LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", os.environ.get("SECRET_KEY"))
 if not SECRET_KEY:
     if not DEBUG:
