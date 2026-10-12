@@ -165,6 +165,7 @@ TEAMS_BOT_APP_ID = os.environ.get("TEAMS_BOT_APP_ID", "")
 TEAMS_BOT_APP_PASSWORD = os.environ.get("TEAMS_BOT_APP_PASSWORD", "")
 TEAMS_BOT_TENANT_ID = os.environ.get("TEAMS_BOT_TENANT_ID", "")
 TEAMS_BOT_PROVIDER_ID = os.environ.get("TEAMS_BOT_PROVIDER_ID", "")
+TEAMS_API_PROVIDER_ID = os.environ.get("TEAMS_API_PROVIDER_ID", "")
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
