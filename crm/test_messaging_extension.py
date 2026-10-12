@@ -11,6 +11,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from botframework.connector.auth import AuthenticationConstants
+from PIL import Image
 
 from .messaging_extension import CARD_BYTE_LIMIT, COMMAND_ID, CONTACT_LIMIT, PAGE_SIZE
 from .models import Agent, Call, Company, Contact
@@ -287,6 +288,25 @@ class MessagingExtensionManifestTests(SimpleTestCase):
         self.assertEqual(command["type"], "query")
         self.assertIn("compose", command["context"])
         self.assertEqual(command["parameters"][0]["name"], "searchText")
+
+    def test_manifest_icons_are_valid_teams_pngs(self):
+        icons = self.manifest()["icons"]
+        for kind, size in (("color", (192, 192)), ("outline", (32, 32))):
+            with self.subTest(kind=kind):
+                path = Path(settings.BASE_DIR) / "teams" / icons[kind]
+                with Image.open(path) as image:
+                    self.assertEqual(image.format, "PNG")
+                    self.assertEqual(image.size, size)
+                    image.load()
+                    if kind == "outline":
+                        self.assertEqual(image.mode, "RGBA")
+                        self.assertEqual(image.getchannel("A").getextrema(), (0, 255))
+                        self.assertTrue(all(
+                            (red, green, blue) == (255, 255, 255)
+                            for red, green, blue, alpha in image.getdata() if alpha
+                        ))
+                    else:
+                        self.assertEqual(image.convert("RGBA").getchannel("A").getextrema(), (255, 255))
 
     def test_manifest_includes_existing_tab_routes(self):
         manifest = self.manifest()

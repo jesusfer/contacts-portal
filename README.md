@@ -210,8 +210,9 @@ then send it. No calls, appointments, inbox records, or Graph tokens are shared.
    authorization error; sign in to the portal and retry.
 4. Customize `teams/manifest.json` using the placeholders below. Set real
    developer, privacy, and terms URLs (the portal
-   does not provide privacy/terms pages). Supply your app's `color.png` (192×192)
-   and transparent white `outline.png` (32×32). Zip the manifest and both icons
+   does not provide privacy/terms pages). The `teams/` directory includes the
+   manifest's Gather-branded `color.png` (192×192) and transparent white
+   `outline.png` (32×32). Zip the customized manifest and both bundled icons
    at the archive root, then upload the package through Teams **Manage your
    apps → Upload an app** or your organization's app catalog. To add these features
    to an existing app, merge `staticTabs`, `configurableTabs`, `composeExtensions`,
