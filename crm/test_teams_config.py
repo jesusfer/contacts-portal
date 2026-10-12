@@ -2,10 +2,13 @@ import json
 
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.contrib.auth import get_user_model
+from django.test import Client, RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from config.settings import GRAPH_SCOPES, TEAMS_CLIENT_IDS, configure_oidc
 from .middleware import TeamsFrameMiddleware
+from .models import Agent, Call, Company, Contact
+from .signals import AUTH_SOURCE_SESSION_KEY
 
 
 class TeamsConfigurationTests(SimpleTestCase):
@@ -100,7 +103,7 @@ class TeamsFrameTests(SimpleTestCase):
         return TeamsFrameMiddleware(downstream)(request)
 
     def test_tab_has_restricted_frame_policy(self):
-        for path in ("/teams/tab/", "/teams/config/"):
+        for path in ("/teams/tab/", "/teams/config/", "/teams/customer/"):
             response = self.response(path)
             self.assertNotIn("X-Frame-Options", response)
             self.assertIn("https://*.cloud.microsoft", response["Content-Security-Policy"])
@@ -115,3 +118,67 @@ class TeamsFrameTests(SimpleTestCase):
     @override_settings(TEAMS_ENABLED=False)
     def test_disabled_teams_keep_frame_protection(self):
         self.assertEqual(self.response("/teams/tab/")["X-Frame-Options"], "DENY")
+        self.assertEqual(self.response("/teams/customer/")["X-Frame-Options"], "DENY")
+
+
+@override_settings(SECURE_SSL_REDIRECT=False, SOCIALACCOUNT_PROVIDERS=configure_oidc(json.dumps([{
+    "id": "entraid-work", "name": "Work",
+    "client_id": "11111111-1111-1111-1111-111111111111",
+    "client_secret": "fixture",
+    "server_url": "https://login.microsoftonline.com/22222222-2222-2222-2222-222222222222/v2.0",
+    "teams": {"resource": "api://portal.example.com/11111111-1111-1111-1111-111111111111"},
+}]), debug=False))
+class TeamsCustomerTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("agent")
+        self.agent = Agent.objects.create(user=self.user)
+        self.company = Company.objects.create(name="Customer")
+        self.other_company = Company.objects.create(name="Other customer")
+        self.contact = Contact.objects.create(name="Alice", email="alice@example.com", company=self.company)
+        other_contact = Contact.objects.create(name="Bob", email="bob@example.com", company=self.other_company)
+        self.call = Call.objects.create(agent=self.agent, contact=self.contact)
+        Call.objects.create(agent=self.agent, contact=other_contact)
+        peer = Agent.objects.create(user=get_user_model().objects.create_user("peer"))
+        Call.objects.create(agent=peer, contact=self.contact, summary="Private peer call")
+        self.client.force_login(self.user)
+        session = self.client.session
+        session[AUTH_SOURCE_SESSION_KEY] = "entraid-work"
+        session["crm_teams_authenticated"] = True
+        session.save()
+
+    def test_customer_contacts_are_shared_but_calls_are_agent_scoped(self):
+        response = self.client.get(f"/api/teams/customers/{self.company.pk}/?provider=entraid-work")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["customer"], {"id": self.company.pk, "name": self.company.name})
+        self.assertEqual([item["id"] for item in data["contacts"]], [self.contact.pk])
+        self.assertEqual([item["id"] for item in data["calls"]], [self.call.pk])
+        self.assertIn("private", response["Cache-Control"])
+        self.assertIn("no-store", response["Cache-Control"])
+        customers = self.client.get("/api/teams/customers/?provider=entraid-work").json()["customers"]
+        self.assertEqual({item["id"] for item in customers}, {self.company.pk, self.other_company.pk})
+
+    def test_require_authentication_and_matching_teams_sso_session(self):
+        for path in ("/api/teams/customers/", f"/api/teams/customers/{self.company.pk}/"):
+            self.assertEqual(Client().get(path + "?provider=entraid-work").status_code, 401)
+            for provider in ("", "entraid-other"):
+                self.assertEqual(self.client.get(path + f"?provider={provider}").status_code, 403)
+            session = self.client.session
+            session["crm_teams_authenticated"] = False
+            session.save()
+            self.assertEqual(self.client.get(path + "?provider=entraid-work").status_code, 403)
+            session["crm_teams_authenticated"] = True
+            session.save()
+
+    def test_unprovisioned_user_and_missing_customer(self):
+        self.assertEqual(self.client.get("/api/teams/customers/999999/?provider=entraid-work").status_code, 404)
+        user = get_user_model().objects.create_user("unprovisioned")
+        self.client.force_login(user)
+        self.assertEqual(self.client.get("/api/teams/customers/?provider=entraid-work").status_code, 403)
+
+    def test_empty_customer_and_read_only_endpoints(self):
+        empty = Company.objects.create(name="Empty")
+        data = self.client.get(f"/api/teams/customers/{empty.pk}/?provider=entraid-work").json()
+        self.assertEqual(data["contacts"], [])
+        self.assertEqual(data["calls"], [])
+        self.assertEqual(self.client.post("/api/teams/customers/?provider=entraid-work").status_code, 405)

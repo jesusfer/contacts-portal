@@ -30,6 +30,72 @@ from .teams import GraphTokenManager, TeamsTokenError, validate_teams_token
 
 
 class TeamsGraphFrontendTests(SimpleTestCase):
+    def test_customer_tab_configuration_validates_and_saves_selection(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required for frontend validation.")
+        source = Path(__file__).resolve().parent.parent / "frontend/src/teams.js"
+        result = subprocess.run(
+            [node, "--input-type=module", "-e", f"""
+import assert from 'node:assert/strict'
+import {{ readFileSync }} from 'node:fs'
+globalThis.window = {{ location: {{ origin: 'https://portal.example.com' }} }}
+let save, saved, valid, selection, failure, success
+const previous = {{ contentUrl: 'https://portal.example.com/teams/customer/?provider=entraid-work&customer=42' }}
+globalThis.sdkMock = {{
+  app: {{ initialize: async () => {{}} }},
+  pages: {{
+    getConfig: async () => previous,
+    config: {{
+      setValidityState: value => {{ valid = value }},
+      registerOnSaveHandler: callback => {{ save = callback }},
+      setConfig: async value => {{ saved = value }},
+    }},
+  }},
+}}
+const code = readFileSync({json.dumps(str(source))}, 'utf8')
+  .replaceAll("import('@microsoft/teams-js')", 'Promise.resolve(globalThis.sdkMock)')
+const teams = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))
+assert.deepEqual(await teams.getTeamsTabConfig(), previous)
+const setValidity = await teams.registerTeamsConfigHandler(() => selection)
+assert.equal(valid, false)
+const event = {{ notifySuccess: () => {{ success = true }}, notifyFailure: error => {{ failure = error }} }}
+await save(event)
+assert.match(failure, /select a customer/)
+assert.equal(saved, undefined)
+selection = {{ provider: {{ id: 'entraid-work' }}, customer: {{ id: 42, name: 'Acme' }} }}
+let responseOk = true, changed = false, urls = []
+globalThis.fetch = async (url, options) => {{
+  urls.push(url)
+  assert.equal(options.credentials, 'same-origin')
+  if (changed) selection = null
+  return {{ ok: responseOk, json: async () => ({{ error: 'Customer unavailable', customer: selection?.customer }}) }}
+}}
+await teams.getTeamsCustomers('entraid-work')
+assert.equal(urls.pop(), '/api/teams/customers/?provider=entraid-work')
+setValidity(true)
+assert.equal(valid, true)
+await save(event)
+assert.equal(success, true)
+assert.equal(urls.pop(), '/api/teams/customers/42/?provider=entraid-work')
+assert.equal(saved.contentUrl, previous.contentUrl)
+assert.equal(saved.entityId, 'gather-customer-entraid-work-42')
+assert.equal(saved.suggestedDisplayName, 'Gather · Acme')
+success = false
+responseOk = false
+await save(event)
+assert.equal(success, false)
+assert.equal(failure, 'Customer unavailable')
+responseOk = true
+changed = true
+await save(event)
+assert.equal(success, false)
+assert.match(failure, /selection changed/)
+"""],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_sdk_identity_binding_and_teams_auth_endpoint_selection(self):
         node = shutil.which("node")
         if not node:

@@ -11,7 +11,7 @@ class TeamsFrameMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
-        is_tab = request.path in ("/teams/tab/", "/teams/config/")
+        is_tab = request.path in ("/teams/tab/", "/teams/config/", "/teams/customer/")
         if settings.TEAMS_ENABLED and is_tab:
             response.headers.pop("X-Frame-Options", None)
             policy = response.get("Content-Security-Policy", "")

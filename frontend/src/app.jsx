@@ -204,8 +204,8 @@ function initialProvider(providers) {
   return providers.length === 1 ? String(providers[0].id) : ''
 }
 
-function ProviderSelect({ providers, selected, onChange }) {
-  return <label class="teams-provider">Organization<select value={selected} onChange={event => onChange(event.target.value)}><option value="">Select an organization</option>{providers.map(provider => <option key={provider.id} value={String(provider.id)}>{provider.name}</option>)}</select></label>
+function ProviderSelect({ providers, selected, onChange, disabled = false }) {
+  return <label class="teams-provider">Organization<select disabled={disabled} value={selected} onChange={event => onChange(event.target.value)}><option value="">Select an organization</option>{providers.map(provider => <option key={provider.id} value={String(provider.id)}>{provider.name}</option>)}</select></label>
 }
 
 function TeamsTab() {
@@ -300,22 +300,33 @@ function TeamsGraphWorkspace({ user, error, opening, openDashboard }) {
 function TeamsConfig() {
   const [providers, setProviders] = useState([]), [selected, setSelected] = useState('')
   const [loading, setLoading] = useState(true), [error, setError] = useState(''), [attempt, setAttempt] = useState(0)
-  const providerRef = useRef(null), validity = useRef(null)
-  providerRef.current = providers.find(provider => String(provider.id) === selected) || null
+  const [signingIn, setSigningIn] = useState(false)
+  const [customers, setCustomers] = useState([]), [customerId, setCustomerId] = useState('')
+  const [authenticatedProvider, setAuthenticatedProvider] = useState('')
+  const selectionRef = useRef(null), validity = useRef(null)
+  selectionRef.current = !loading && !signingIn && !error && authenticatedProvider === selected ? {
+    provider: providers.find(provider => String(provider.id) === selected),
+    customer: customers.find(customer => String(customer.id) === customerId),
+  } : null
   useEffect(() => {
     let active = true
-    setLoading(true); setError('')
+    setLoading(true); setError(''); setSelected(''); setCustomers([]); setAuthenticatedProvider('')
     async function configure() {
       try {
         const config = await TeamsSDK.getTeamsConfig()
         await TeamsSDK.initializeTeams()
         if (!active) return
-        const setValidity = await TeamsSDK.registerTeamsConfigHandler(() => providerRef.current)
+        const setValidity = await TeamsSDK.registerTeamsConfigHandler(() => selectionRef.current)
         if (!active) { setValidity(false); return }
         validity.current = setValidity
         const choices = config.providers || []
         setProviders(choices)
-        setSelected(initialProvider(choices))
+        const saved = await TeamsSDK.getTeamsTabConfig()
+        if (!active) return
+        const savedUrl = saved.contentUrl ? new URL(saved.contentUrl) : null
+        const savedProvider = savedUrl?.searchParams.get('provider')
+        setSelected(savedProvider && choices.some(provider => String(provider.id) === savedProvider) ? savedProvider : initialProvider(choices))
+        setCustomerId(savedUrl?.searchParams.get('customer') || '')
         if (!choices.length) throw new Error('No Teams organizations are configured. Contact your administrator.')
       } catch (error) {
         if (active) setError(error.message || 'Unable to configure this tab.')
@@ -324,10 +335,71 @@ function TeamsConfig() {
       }
     }
     configure()
-    return () => { active = false; validity.current?.(false); validity.current = null; providerRef.current = null }
+    return () => { active = false; validity.current?.(false); validity.current = null; selectionRef.current = null }
   }, [attempt])
-  useEffect(() => { validity.current?.(!loading && !error && !!providerRef.current) }, [loading, error, selected, providers])
-  return <div class="teams-page"><div class="teams-container"><h2>Gather for Teams</h2><p class="muted">Choose your organization, then click Save to add Gather.</p>{loading ? <Loading/> : <><ErrorNotice error={error} retry={() => setAttempt(n => n + 1)}/>{!error && <ProviderSelect providers={providers} selected={selected} onChange={setSelected}/>}</>}</div></div>
+  useEffect(() => {
+    let active = true
+    setCustomers([]); setAuthenticatedProvider(''); validity.current?.(false)
+    if (!selected) { setSigningIn(false); return () => { active = false } }
+    setSigningIn(true); setError('')
+    async function signIn() {
+      try {
+        const token = await TeamsSDK.getTeamsAuthToken()
+        if (!active) return
+        const session = await TeamsSDK.exchangeTeamsToken(selected, token)
+        if (!active) return
+        if (!session.user || !session.agent) throw new Error('Your CRM account must be linked and provisioned with an agent. Open browser sign-in or contact your administrator.')
+        const data = await TeamsSDK.getTeamsCustomers(selected)
+        if (!active) return
+        setCustomers(data.customers); setAuthenticatedProvider(selected)
+      } catch (error) {
+        if (active) setError(error.message)
+      } finally {
+        if (active) setSigningIn(false)
+      }
+    }
+    signIn()
+    return () => { active = false }
+  }, [selected])
+  useEffect(() => {
+    validity.current?.(!!selectionRef.current?.provider && !!selectionRef.current?.customer)
+  }, [loading, signingIn, error, selected, providers, customers, customerId, authenticatedProvider])
+  return <div class="teams-page"><div class="teams-container"><h2>Gather customer tab</h2><p class="muted">Sign in with Teams, choose a CRM customer, then click Save. Calls are private to the signed-in agent.</p><ProviderSelect providers={providers} selected={selected} disabled={loading || signingIn} onChange={value => { validity.current?.(false); selectionRef.current = null; setCustomerId(''); setSelected(value) }}/>{loading || signingIn ? <Loading/> : <><ErrorNotice error={error} retry={() => setAttempt(n => n + 1)}/>{authenticatedProvider === selected && selected && !error && <label class="teams-provider">Customer<select value={customerId} onChange={event => setCustomerId(event.target.value)}><option value="">Select a customer</option>{customers.map(customer => <option key={customer.id} value={String(customer.id)}>{customer.name}</option>)}</select>{!customers.length && <p class="muted">No customers are available in the CRM.</p>}</label>}<a class="button secondary" href="/#/login" target="_blank" rel="noopener noreferrer">Open browser sign-in</a></>}</div></div>
+}
+
+function TeamsCustomerTab() {
+  const [data, setData] = useState(null), [error, setError] = useState(''), [loading, setLoading] = useState(true), [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let active = true
+    setData(null); setError(''); setLoading(true)
+    async function load() {
+      try {
+        const query = new URLSearchParams(location.search)
+        const customerId = query.get('customer')
+        if (!/^[1-9]\d*$/.test(customerId || '')) throw new Error('Choose a customer in the tab configuration.')
+        const config = await TeamsSDK.getTeamsConfig()
+        const providerId = initialProvider(config.providers || [])
+        if (!providerId) throw new Error('Choose an organization in the tab configuration.')
+        const token = await TeamsSDK.getTeamsAuthToken()
+        if (!active) return
+        const session = await TeamsSDK.exchangeTeamsToken(providerId, token)
+        if (!active) return
+        if (!session.user || !session.agent) throw new Error('Your CRM account must be linked and provisioned with an agent.')
+        const result = await TeamsSDK.getTeamsCustomer(providerId, customerId)
+        if (active) setData(result)
+      } catch (error) {
+        if (active) setError(error.message)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    load()
+    return () => { active = false }
+  }, [attempt])
+  return <main class="content"><PageHeading title={data?.customer.name || 'Gather customer tab'} subtitle="Customer contacts and your CRM calls."/><button class="button secondary" disabled={loading} onClick={() => setAttempt(n => n + 1)}>Refresh</button>{loading ? <Loading/> : <ErrorNotice error={error} retry={() => setAttempt(n => n + 1)}/>}
+    {data && <div class="dashboard-grid"><Panel title="Contacts" count={data.contacts.length}>{data.contacts.map(contact => <div class="list-row" key={contact.id}><span class="avatar">{initials(contact.name)}</span><div class="row-main"><strong>{contact.name}</strong><p>{contact.email}</p></div></div>)}{!data.contacts.length && <Empty title="No contacts" icon="contacts">This customer has no contacts.</Empty>}</Panel><Panel title="Your calls" count={data.calls.length}>{data.calls.map(call => <div class="list-row" key={call.id}><div class="row-main"><strong>{call.contact.name}</strong><p>{call.summary || 'No summary'}</p><small>{dateTime(call.appointment?.starts_at)}</small></div><Badge status={call.status}/></div>)}{!data.calls.length && <Empty title="No calls" icon="calls">You have no calls for this customer.</Empty>}</Panel></div>}
+    {error && <a class="button secondary" href="/#/login" target="_blank" rel="noopener noreferrer">Open browser sign-in</a>}
+  </main>
 }
 
 function Profile({ user, revision, onUpdate }) {
@@ -581,6 +653,7 @@ function CreateForm({ type, initialId, done, close }) {
 }
 export function App() {
   if (location.pathname === '/teams/config/') return <TeamsConfig/>
+  if (location.pathname === '/teams/customer/') return <TeamsCustomerTab/>
   if (location.pathname === '/teams/tab/') return <TeamsTab/>
   return <WorkspaceApp/>
 }
