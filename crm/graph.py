@@ -7,6 +7,8 @@ import requests
 from django.core import signing
 from django.utils.html import strip_tags
 
+from .external_calls import logged_request
+
 
 class GraphClientError(Exception):
     status = 502
@@ -35,8 +37,14 @@ class GraphClient:
 
     def _request(self, endpoint, params=None):
         try:
-            response = requests.get(
+            response = logged_request(
+                requests.get,
                 f"{self.GRAPH_BASE}{endpoint}",
+                service="graph",
+                operation=endpoint if endpoint in {
+                    "/me", "/me/calendarView", "/me/mailFolders/inbox/messages", "/me/presence",
+                } else "http_request",
+                method="GET",
                 headers={
                     "Authorization": "Bearer " + self.access_token,
                     "Accept": "application/json",
@@ -72,8 +80,10 @@ class GraphClient:
 
     def get_photo(self):
         try:
-            response = requests.get(
+            response = logged_request(
+                requests.get,
                 f"{self.GRAPH_BASE}/me/photo/$value",
+                service="graph", operation="/me/photo/$value", method="GET",
                 headers={"Authorization": "Bearer " + self.access_token},
                 timeout=10, allow_redirects=False,
             )

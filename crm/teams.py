@@ -11,6 +11,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from .external_calls import logged_request
 from .graph import GraphClient, GraphClientError, TokenExpiredError
 
 
@@ -78,8 +79,10 @@ def _get_jwks(tenant_id, *, reload=False):
     keys = None if reload else cache.get(key)
     if keys is None:
         try:
-            response = requests.get(
+            response = logged_request(
+                requests.get,
                 f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys",
+                service="entraid", operation="signing_keys", method="GET",
                 timeout=10, allow_redirects=False,
             )
             if response.status_code != 200:
@@ -167,8 +170,12 @@ def exchange_graph_token(app, *, assertion=None, refresh_token=None, tenant_id=N
     else:
         data.update({"grant_type": "refresh_token", "refresh_token": refresh_token})
     try:
-        response = requests.post(
+        response = logged_request(
+            requests.post,
             f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+            service="entraid",
+            operation="on_behalf_of" if assertion is not None else "refresh_token",
+            method="POST",
             data=data, timeout=10, allow_redirects=False,
         )
         if response.status_code in (400, 401, 403):
