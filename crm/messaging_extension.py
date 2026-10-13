@@ -33,10 +33,12 @@ CARD_BYTE_LIMIT = 16000
 
 
 def plain_text(value):
+    """Escape Markdown-sensitive characters before displaying text in a Teams card."""
     return re.sub(r"([\\`*_{}\[\]()#+.!<>|~-])", r"\\\1", value)
 
 
 def customer_card(company):
+    """Build an Adaptive Card with a customer's details and bounded contact list."""
     body = [
         {"type": "TextBlock", "text": plain_text(company.name), "weight": "Bolder",
          "size": "Large", "wrap": True},
@@ -68,6 +70,7 @@ def customer_card(company):
 
 
 def authorize(activity):
+    """Require the activity sender to match a provisioned agent in the configured tenant."""
     try:
         tenant = str(UUID(activity.channel_data["tenant"]["id"]))
         oid = str(UUID(activity.from_property.aad_object_id))
@@ -86,6 +89,7 @@ def authorize(activity):
 
 
 def search_customers(text, skip, count):
+    """Return a page of matching customers annotated with their contact counts."""
     return list(
         Company.objects.filter(name__icontains=text).annotate(
             contact_count=Count("contacts"),
@@ -94,12 +98,14 @@ def search_customers(text, skip, count):
 
 
 def selected_customer(pk):
+    """Fetch one customer with a bounded set of contacts for its detail card."""
     return Company.objects.annotate(contact_count=Count("contacts")).prefetch_related(Prefetch(
         "contacts", queryset=Contact.objects.all()[:CONTACT_LIMIT], to_attr="card_contacts",
     )).filter(pk=pk).first()
 
 
 def result_response(attachments):
+    """Wrap card attachments in a Teams messaging-extension result response."""
     response = MessagingExtensionResponse(compose_extension=MessagingExtensionResult(
         type="result", attachment_layout="list", attachments=attachments,
     ))
@@ -108,6 +114,7 @@ def result_response(attachments):
 
 class CustomerMessagingExtension(TeamsActivityHandler):
     async def on_invoke_activity(self, turn_context):
+        """Authorize and handle supported customer-search and card-selection invokes."""
         if turn_context.activity.name not in ("composeExtension/query", "composeExtension/selectItem"):
             return InvokeResponse(status=501)
         try:
@@ -165,6 +172,7 @@ class CustomerMessagingExtension(TeamsActivityHandler):
 
 
 async def channel_claims_only(claims):
+    """Reject Bot Framework tokens that did not originate from a Teams channel."""
     # Emulator/skill tokens must never be allowed to impersonate a Teams user.
     if claims.get("iss") != AuthenticationConstants.TO_BOT_FROM_CHANNEL_TOKEN_ISSUER:
         raise PermissionError("A Bot Framework channel token is required.")
@@ -172,6 +180,7 @@ async def channel_claims_only(claims):
 
 class TeamsChannelAdapter(BotFrameworkAdapter):
     async def _authenticate_request(self, activity, authorization):
+        """Translate Bot Framework authentication failures into endpoint-safe errors."""
         try:
             return await super()._authenticate_request(activity, authorization)
         except Exception as exc:
@@ -180,6 +189,7 @@ class TeamsChannelAdapter(BotFrameworkAdapter):
 
 
 async def process_activity(activity, authorization):
+    """Process an authenticated Teams activity with the customer messaging extension."""
     adapter = TeamsChannelAdapter(BotFrameworkAdapterSettings(
         app_id=settings.TEAMS_BOT_APP_ID,
         app_password=settings.TEAMS_BOT_APP_PASSWORD,
@@ -192,6 +202,7 @@ async def process_activity(activity, authorization):
 @csrf_exempt
 @require_POST
 def messages(request):
+    """Validate and dispatch a Bot Framework invoke request to the Teams extension."""
     if not all((
         settings.TEAMS_BOT_APP_ID, settings.TEAMS_BOT_APP_PASSWORD,
         settings.TEAMS_BOT_TENANT_ID, settings.TEAMS_BOT_PROVIDER_ID,

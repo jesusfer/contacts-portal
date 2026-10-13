@@ -619,6 +619,7 @@ def graph_presence(request):
 @ensure_csrf_cookie
 @api(["GET"], agent_required=False)
 def teams_config(request):
+    """Expose configured Teams providers for the Teams tab and SSO client."""
     providers = settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
     return JsonResponse({"graph_only": settings.TEAMS_GRAPH_ONLY, "providers": [{
         "id": app["provider_id"], "provider_id": app["provider_id"], "name": app["name"],
@@ -629,15 +630,18 @@ def teams_config(request):
 
 @api(["POST"], agent_required=False)
 def teams_sso(request):
+    """Exchange a Teams SSO token for CRM and delegated Graph authentication."""
     return _teams_auth(request)
 
 
 @api(["POST"], agent_required=False)
 def teams_identity(request):
+    """Validate a Teams SSO token and return its identity without CRM sign-in."""
     return _teams_auth(request, graph_only=True)
 
 
 def teams_crm_authorized(request):
+    """Check that the session and requested provider have an active Teams CRM sign-in."""
     provider_id = request.session.get(AUTH_SOURCE_SESSION_KEY)
     app = graph_provider(provider_id)
     return (
@@ -649,6 +653,7 @@ def teams_crm_authorized(request):
 
 @api(["GET"])
 def teams_customers(request):
+    """Return the customer directory to an authorized Teams CRM tab."""
     if not teams_crm_authorized(request):
         return error("Sign in to the CRM with Teams SSO first.", 403)
     return JsonResponse({"customers": [company_json(item) for item in Company.objects.all()]})
@@ -656,6 +661,7 @@ def teams_customers(request):
 
 @api(["GET"])
 def teams_customer(request, pk):
+    """Return one customer's details and agent-scoped calls for an authorized Teams tab."""
     if not teams_crm_authorized(request):
         return error("Sign in to the CRM with Teams SSO first.", 403)
     company = get_object_or_404(Company, pk=pk)
@@ -667,6 +673,7 @@ def teams_customer(request, pk):
 
 
 def _teams_auth(request, *, graph_only=False):
+    """Validate Teams SSO, optionally sign in to the CRM, and establish Graph access."""
     if len(request.body) > 32768:
         return error("Teams SSO request is too large.", 400)
     data = payload(request, {"provider_id": TEXT, "token": TEXT}, required=("provider_id", "token"))

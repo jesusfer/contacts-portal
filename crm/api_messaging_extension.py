@@ -19,6 +19,7 @@ SUMMARY_LIMIT = 200
 
 
 def response(data, status=200):
+    """Create a non-cacheable JSON response, adding a bearer challenge when needed."""
     result = JsonResponse(data, status=status)
     result["Cache-Control"] = "private, no-store"
     if status == 401:
@@ -27,6 +28,7 @@ def response(data, status=200):
 
 
 def call_history(calls):
+    """Format an agent's recent call records for display in a Teams contact card."""
     entries = []
     for call in calls:
         details = [f"Call #{call.pk}", call.get_status_display()]
@@ -43,6 +45,7 @@ def call_history(calls):
 
 @require_GET
 def search_contacts(request):
+    """Authenticate a delegated Teams token and return matching contacts with recent calls."""
     app = graph_provider(settings.TEAMS_API_PROVIDER_ID)
     try:
         if not app:

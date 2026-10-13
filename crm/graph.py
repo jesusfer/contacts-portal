@@ -30,12 +30,14 @@ class GraphClient:
     PROFILE_FIELDS = "id,displayName,givenName,surname,mail,userPrincipalName"
 
     def __init__(self, access_token, tenant_id=None, *, user_id=None, provider_id=None):
+        """Create a Graph client bound to a delegated token and optional identity context."""
         self.access_token = access_token
         self.tenant_id = tenant_id
         self.user_id = user_id
         self.provider_id = provider_id
 
     def _request(self, endpoint, params=None):
+        """Make a read-only Graph request and translate transport or authorization errors."""
         try:
             response = logged_request(
                 requests.get,
@@ -61,6 +63,7 @@ class GraphClient:
         return response
 
     def _json(self, endpoint, params=None):
+        """Return an object response from Graph, rejecting invalid JSON payloads."""
         try:
             data = self._request(endpoint, params).json()
         except ValueError as exc:
@@ -70,6 +73,7 @@ class GraphClient:
         return data
 
     def get_profile(self):
+        """Fetch and validate the delegated user's basic Microsoft Graph profile."""
         data = self._json("/me", {"$select": self.PROFILE_FIELDS})
         if not isinstance(data.get("id"), str) or not data["id"] or any(
             data.get(field) is not None and not isinstance(data[field], str)
@@ -79,6 +83,7 @@ class GraphClient:
         return data
 
     def get_photo(self):
+        """Fetch the delegated user's profile photo, returning ``None`` when absent."""
         try:
             response = logged_request(
                 requests.get,
@@ -98,12 +103,14 @@ class GraphClient:
         return response.content
 
     def _context(self, kind):
+        """Build the identity context used to bind signed pagination cursors."""
         return {
             "kind": kind, "user": self.user_id,
             "provider": self.provider_id, "tenant": self.tenant_id,
         }
 
     def _page(self, kind, endpoint, params, page):
+        """Fetch a Graph page and issue a signed cursor for a validated next link."""
         if page is not None:
             try:
                 cursor = signing.loads(page, salt=self.CURSOR_SALT, max_age=3600)
@@ -156,6 +163,7 @@ class GraphClient:
 
     @staticmethod
     def _event_time(value):
+        """Normalize a Graph date-time value to a UTC ISO timestamp."""
         try:
             date = datetime.fromisoformat(value["dateTime"])
             if date.tzinfo is None:
@@ -165,6 +173,7 @@ class GraphClient:
             raise GraphClientError("Invalid Graph event time.") from exc
 
     def get_calendar_view(self, start_dt, end_dt, top=50, page=None):
+        """Return calendar events and a signed cursor for the next Graph page."""
         params = {
             "startDateTime": start_dt.astimezone(timezone.utc).isoformat(),
             "endDateTime": end_dt.astimezone(timezone.utc).isoformat(),
@@ -186,6 +195,7 @@ class GraphClient:
         }
 
     def get_mailbox_messages(self, top=25, page=None):
+        """Return normalized inbox messages and a signed cursor for the next page."""
         params = {
             "$select": "id,subject,body,bodyPreview,from,receivedDateTime,isRead,webLink",
             "$orderby": "receivedDateTime desc", "$top": str(top),
@@ -214,5 +224,6 @@ class GraphClient:
         return {"emails": emails, "next_page": next_page}
 
     def get_presence(self):
+        """Return the delegated user's current Microsoft Graph presence."""
         data = self._json("/me/presence")
         return {"availability": data.get("availability"), "activity": data.get("activity")}
