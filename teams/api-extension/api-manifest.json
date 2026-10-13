@@ -1,9 +1,8 @@
 {
-  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
-  "manifestVersion": "1.19",
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.30",
   "version": "1.0.0",
   "id": "<TEAMS_API_APP_ID>",
-  "packageName": "com.contactsportal.contactcards",
   "developer": {
     "name": "Contacts Portal",
     "websiteUrl": "https://<PORTAL_HOST>",
@@ -23,6 +22,7 @@
     "outline": "outline.png"
   },
   "accentColor": "#FFFFFF",
+  "supportsChannelFeatures": "tier1",
   "composeExtensions": [
     {
       "composeExtensionType": "apiBased",
