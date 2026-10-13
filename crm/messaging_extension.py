@@ -227,7 +227,8 @@ def handle_action(agent, name, value):
         call = Call.objects.filter(pk=_pk(data.get("call_id")), agent=agent, contact=contact).first()
         if not call:
             return InvokeResponse(status=404)
-        call.summary = summary.strip()
+        summary = summary.strip()
+        call.summary = f"{call.summary.rstrip()}\n\n{summary}" if call.summary.strip() else summary
         call.save(update_fields=["summary"])
         return task_response(message="Call summary saved.")
     return InvokeResponse(status=400)

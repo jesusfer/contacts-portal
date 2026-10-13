@@ -151,7 +151,15 @@ class MessagingExtensionTests(TestCase):
             **data, "call_id": str(call.pk), "summary": "Done"})
         self.assertEqual(response.json()["task"]["type"], "message")
         call.refresh_from_db()
-        self.assertEqual(call.summary, "Done")
+        self.assertEqual(call.summary, "Private call\n\nDone")
+
+    def test_action_command_appends_to_existing_summary(self):
+        call = self.agent.calls.get()
+        self.action("composeExtension/submitAction", data={
+            "step": "call", "contact_id": str(self.contact.pk), "call_id": str(call.pk),
+            "summary": "New note"})
+        call.refresh_from_db()
+        self.assertEqual(call.summary, "Private call\n\nNew note")
 
     def test_action_command_rejects_other_agents_calls(self):
         other = Agent.objects.create(user=get_user_model().objects.create_user("other"))
