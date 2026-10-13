@@ -57,6 +57,14 @@
               "description": "Enter all or part of a customer company name."
             }
           ]
+        },
+        {
+          "id": "logCallSummary",
+          "type": "action",
+          "title": "Log call summary",
+          "description": "Select a customer, contact and call and complete the call summary.",
+          "context": ["message", "compose", "commandBox"],
+          "fetchTask": true
         }
       ]
     }

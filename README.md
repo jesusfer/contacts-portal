@@ -231,7 +231,7 @@ then send it. No calls, appointments, inbox records, or Graph tokens are shared.
    verified Bot Framework channel identity, not browser session cookies, email
    matching, or Graph permissions. Unlinked or unprovisioned users receive an
    authorization error; sign in to the portal and retry.
-4. Customize `teams/manifest.json` using the placeholders below. Set real
+4. Customize `teams/tabs-bot-extension/manifest.json` using the placeholders below. Set real
    developer, privacy, and terms URLs (the portal
    does not provide privacy/terms pages). The `teams/` directory includes the
    manifest's Gather-branded `color.png` (192×192) and transparent white
@@ -286,6 +286,12 @@ the existing shared directory, not the agent's company memberships.
 Sending a card shares its contents with everyone in that conversation,
 including external participants; only share customer data with authorized
 recipients. Cards are snapshots and do not update after portal edits.
+The manifest also defines the **Log call summary** action command (`logCallSummary`),
+available from a message's **More actions** menu, the compose box, or the command box.
+A dialog asks the user to pick a customer, a contact, and one of their own calls with
+dropdowns, then to complete the call summary. When invoked from a message, the message
+text is prefilled as the summary (up to 4000 characters). Saving sets the selected call's
+summary, or appends the entered text below the call's existing summary. Dropdowns show at most 100 entries; only the agent's own calls are offered.
 Test the deployed bot in Teams by searching a customer (including one with no
 contacts), selecting it, and sending its card.
 
@@ -325,7 +331,7 @@ shortened to keep cards bounded.
    `outline.png` together at the ZIP archive root. Upload through Teams **Manage
    your apps → Upload an app** or your organization's catalog. Do not include the
    existing bot manifest: Teams supports only one compose extension per app.
-   The original `teams/manifest.json`, bot endpoint, and tabs remain unchanged.
+   The original `teams/tabs-bot-extension/manifest.json`, bot endpoint, and tabs remain unchanged.
 
 The minimal OpenAPI 3.0.1 definition describes only
 `GET /api/teams/contact-search/?query=...`, with one required search parameter,
