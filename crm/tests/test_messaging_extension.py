@@ -323,7 +323,7 @@ class MessagingExtensionTests(TestCase):
 
 class MessagingExtensionManifestTests(SimpleTestCase):
     def manifest(self):
-        return json.loads((Path(settings.BASE_DIR) / "teams" / "manifest.json").read_text())
+        return json.loads((Path(settings.BASE_DIR) / "teams" / "tabs-bot-extension" / "manifest.json").read_text())
 
     def test_manifest_matches_handler(self):
         manifest = self.manifest()
@@ -342,7 +342,7 @@ class MessagingExtensionManifestTests(SimpleTestCase):
         icons = self.manifest()["icons"]
         for kind, size in (("color", (192, 192)), ("outline", (32, 32))):
             with self.subTest(kind=kind):
-                path = Path(settings.BASE_DIR) / "teams" / icons[kind]
+                path = Path(settings.BASE_DIR) / "teams" / "tabs-bot-extension" / icons[kind]
                 with Image.open(path) as image:
                     self.assertEqual(image.format, "PNG")
                     self.assertEqual(image.size, size)

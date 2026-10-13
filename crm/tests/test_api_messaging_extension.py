@@ -139,7 +139,7 @@ class APIContactSearchTests(TestCase):
             )
         row = self.search("example.com").json()["contacts"][0]
         template = json.loads(
-            (Path(settings.BASE_DIR) / "teams/contact-card-template.json").read_text()
+            (Path(settings.BASE_DIR) / "teams/api-extension/contact-card-template.json").read_text()
         )["responseCardTemplate"]
 
         def render(value):
@@ -229,7 +229,7 @@ class APIContactSearchTests(TestCase):
 
 class APIExtensionPackageTests(SimpleTestCase):
     def setUp(self):
-        self.root = Path(settings.BASE_DIR) / "teams"
+        self.root = Path(settings.BASE_DIR) / "teams" / "api-extension"
 
     def test_schema_describes_only_the_contact_search_operation(self):
         spec = json.loads((self.root / "contact-search-openapi.json").read_text())
