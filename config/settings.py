@@ -148,9 +148,13 @@ def configure_oidc(raw, *, debug):
             if (
                 not resource_url or resource_url.scheme != "api" or not resource_url.hostname
                 or resource_url.username or resource_url.password or resource_url.query
-                or resource_url.fragment or resource_url.path != f"/{client_id}"
+                or resource_url.fragment
+                or resource_url.path not in {f"/{client_id}", f"/botid-{client_id}"}
             ):
-                raise ImproperlyConfigured("Teams resource must be api://<portal hostname>/<client_id>.")
+                raise ImproperlyConfigured(
+                    "Teams resource must be api://<portal hostname>/<client_id> "
+                    "or api://<portal hostname>/botid-<client_id>."
+                )
             clients = teams.get("authorized_client_ids", TEAMS_CLIENT_IDS)
             try:
                 if not isinstance(clients, list) or not clients:

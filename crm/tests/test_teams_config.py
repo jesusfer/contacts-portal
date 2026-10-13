@@ -38,6 +38,11 @@ class TeamsConfigurationTests(SimpleTestCase):
         self.assertEqual(app["settings"]["teams"]["authorized_client_ids"], TEAMS_CLIENT_IDS)
         self.assertEqual(app["settings"]["teams"]["audience"], app["client_id"])
 
+    def test_teams_accepts_bot_resource(self):
+        resource = "api://portal.example.com/botid-11111111-1111-1111-1111-111111111111"
+        app = self.configure(self.provider(teams={"resource": resource}))
+        self.assertEqual(app["settings"]["teams"]["resource"], resource)
+
     def test_organizations_issuer_defaults_and_teams(self):
         app = self.configure(self.provider(
             server_url="https://login.microsoftonline.com/organizations/v2.0",
@@ -59,6 +64,7 @@ class TeamsConfigurationTests(SimpleTestCase):
             {},
             {"resource": "https://portal.example.com"},
             {"resource": "api://portal.example.com/wrong"},
+            {"resource": "api://portal.example.com/botid-wrong"},
             {"resource": "api://portal.example.com/11111111-1111-1111-1111-111111111111", "audience": "other"},
             {"resource": "api://portal.example.com/11111111-1111-1111-1111-111111111111", "tenant_id": "33333333-3333-3333-3333-333333333333"},
             {"resource": "api://portal.example.com/11111111-1111-1111-1111-111111111111", "authorized_client_ids": []},
