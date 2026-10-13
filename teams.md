@@ -46,18 +46,18 @@ sequenceDiagram
     Django->>Entra: Signing keys when needed
     Django-->>Tab: Verified oid and tenant (no login / OBO)
     Tab->>Entra: SDK/MSAL delegated Graph token (silent or popup)
-    Tab->>Graph: GET /me; verify tenant and object identity
-    Graph-->>Tab: Profile; SDK reads photo, calendar, Inbox, presence
-    Note over Tab,Django: Stay in SPA; no CRM or server Graph reads
+    Tab->>Graph: GET /me and verify tenant and object identity
+    Graph-->>Tab: Profile and SDK reads of photo, calendar, Inbox, presence
+    Note over Tab,Django: Stay in SPA with no CRM or server Graph reads
     opt User chooses Open full dashboard
         User->>Tab: Open full dashboard
         Tab->>Teams: Fresh getAuthToken
-        Tab->>Django: POST /api/teams/identity/; compare identity
+        Tab->>Django: POST /api/teams/identity/ and compare identity
         Tab->>Django: POST /api/teams/sso/ (CSRF)
         Django->>Django: Validate token and linked active OIDC account
         Django->>Entra: OBO exchange (server-only secret)
         Entra-->>Django: Delegated Graph access / refresh tokens
-        Django->>Graph: GET /me; verify oid
+        Django->>Graph: GET /me and verify oid
         Django-->>Tab: Django session cookie and dashboard session
         Note over Tab,Django: Full CRM APIs now require Agent provisioning
     end
@@ -80,10 +80,10 @@ sequenceDiagram
     Django->>Django: Validate token and linked active OIDC account
     Django->>Entra: OBO exchange (server-only secret)
     Entra-->>Django: Delegated Graph access / refresh tokens
-    Django->>Graph: GET /me; verify oid
+    Django->>Graph: GET /me and verify oid
     Django-->>Tab: Session cookie, profile, verified oid / tenant
     Tab->>Entra: SDK/MSAL delegated Graph token (silent or popup)
-    Tab->>Graph: GET /me; verify tenant and oid
+    Tab->>Graph: GET /me and verify tenant and oid
     Note over Tab,Django: Automatically open full embedded dashboard
     Tab->>Graph: SDK profile, photo, calendar, Inbox, presence reads
     Tab->>Django: Session and agent-scoped CRM APIs
