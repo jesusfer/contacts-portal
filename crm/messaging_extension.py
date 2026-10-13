@@ -243,6 +243,9 @@ def result_response(attachments):
 
 
 class CustomerMessagingExtension(TeamsActivityHandler):
+    async def on_message_activity(self, turn_context):
+        await turn_context.send_activity("This bot is not enabled for conversation.")
+
     async def on_invoke_activity(self, turn_context):
         """Authorize and handle supported customer-search and card-selection invokes."""
         if turn_context.activity.name not in (
@@ -337,7 +340,7 @@ async def process_activity(activity, authorization):
 @csrf_exempt
 @require_POST
 def messages(request):
-    """Validate and dispatch a Bot Framework invoke request to the Teams extension."""
+    """Validate and dispatch a Bot Framework message or invoke to the Teams extension."""
     if not all((
         settings.TEAMS_BOT_APP_ID, settings.TEAMS_BOT_APP_PASSWORD,
         settings.TEAMS_BOT_TENANT_ID, settings.TEAMS_BOT_PROVIDER_ID,
@@ -356,12 +359,12 @@ def messages(request):
             raise ValueError
         activity = Activity().deserialize(data)
         if (
-            activity.type != "invoke" or activity.channel_id != "msteams"
+            activity.type not in ("invoke", "message") or activity.channel_id != "msteams"
             or not isinstance(activity.service_url, str)
             or not activity.service_url.startswith("https://")
             or not isinstance(activity.channel_data, dict)
             or ("tenant" in activity.channel_data and not isinstance(activity.channel_data["tenant"], dict))
-            or not isinstance(activity.value, dict)
+            or (activity.type == "invoke" and not isinstance(activity.value, dict))
         ):
             raise ValueError
     except (ValueError, TypeError, AttributeError, KeyError, DeserializationError):
@@ -373,7 +376,9 @@ def messages(request):
     result = (
         JsonResponse(response.body, status=response.status)
         if response and response.body is not None
-        else HttpResponse(status=response.status if response else 500)
+        else HttpResponse(status=response.status if response else (
+            200 if activity.type == "message" else 500
+        ))
     )
     result["Cache-Control"] = "private, no-store"
     return result

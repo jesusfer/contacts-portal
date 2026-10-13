@@ -1,5 +1,12 @@
 The manifests must be separated because each manifest can have only one messaging extension.
 
+## Bot messages
+
+The Bot Framework endpoint (`/api/teams/messages/`) replies to user messages with
+“This bot is not enabled for conversation.” It does not process message content
+or require CRM provisioning for this notice. Bot Framework channel authentication
+is still required; messaging-extension invokes retain their CRM authorization.
+
 ## Package the manifests
 
 Requires Python 3, with no additional dependencies.
