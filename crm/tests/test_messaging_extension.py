@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import Client, SimpleTestCase, TestCase, override_settings
+from botbuilder.schema import ResourceResponse
 from botframework.connector.auth import AuthenticationConstants
 from PIL import Image
 
@@ -281,6 +282,54 @@ class MessagingExtensionTests(TestCase):
     def test_other_channels_and_unsupported_invokes_are_rejected(self):
         self.assertEqual(self.post(self.activity(channelId="emulator")).status_code, 400)
         self.assertEqual(self.post(self.activity(name="composeExtension/anonymousQueryLink")).status_code, 501)
+
+    @patch("crm.messaging_extension.TeamsChannelAdapter.send_activities", new_callable=AsyncMock)
+    def test_message_receives_conversation_disabled_reply(self, send):
+        send.return_value = [ResourceResponse(id="reply")]
+        for text in ("Hello", None):
+            with self.subTest(text=text):
+                activity = self.activity(type="message", id="incoming-message", text=text)
+                del activity["name"]
+                del activity["value"]
+                response = self.post(activity)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.content, b"")
+                self.assertEqual(response["Cache-Control"], "private, no-store")
+                send.assert_awaited_once()
+                context, activities = send.call_args.args
+                reply, = activities
+                self.assertEqual(reply.type, "message")
+                self.assertEqual(reply.text, "This bot is not enabled for conversation.")
+                self.assertEqual(reply.conversation.id, "conversation")
+                self.assertEqual(reply.recipient.id, "teams-user")
+                self.assertEqual(reply.reply_to_id, "incoming-message")
+                send.reset_mock()
+
+    @patch("crm.messaging_extension.TeamsChannelAdapter.send_activities", new_callable=AsyncMock)
+    def test_message_notice_does_not_require_crm_provisioning(self, send):
+        send.return_value = [ResourceResponse(id="reply")]
+        self.account.delete()
+        self.agent.delete()
+        response = self.post(self.activity(type="message", value=None, text="Hello"))
+        self.assertEqual(response.status_code, 200)
+        send.assert_awaited_once()
+
+    @patch("crm.messaging_extension.TeamsChannelAdapter.send_activities", new_callable=AsyncMock)
+    def test_messages_still_require_channel_authentication_and_validation(self, send):
+        activity = self.activity(type="message", value=None, text="Hello")
+        for token in ("not-a-jwt", self.token(aud="another-app"),
+                      self.token(serviceurl="https://another.example/")):
+            with self.subTest(token=token):
+                self.assertEqual(self.post(activity, token=token).status_code, 401)
+        self.assertEqual(self.client.post(
+            ENDPOINT, json.dumps(activity), content_type="application/json",
+        ).status_code, 401)
+        activity["channelId"] = "emulator"
+        self.assertEqual(self.post(activity).status_code, 400)
+        activity["channelId"] = "msteams"
+        activity["type"] = "event"
+        self.assertEqual(self.post(activity).status_code, 400)
+        send.assert_not_awaited()
 
     def test_selection_rechecks_authorization_and_loads_current_details(self):
         self.contact.name = "Updated contact"
