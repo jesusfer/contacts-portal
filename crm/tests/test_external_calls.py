@@ -6,9 +6,9 @@ from allauth.socialaccount import app_settings
 from django.core.cache import cache
 from django.test import SimpleTestCase
 
-from .external_calls import logged_request
-from .graph import GraphClient, GraphClientError, TokenExpiredError
-from .teams import _get_jwks, exchange_graph_token
+from ..external_calls import logged_request
+from ..graph import GraphClient, GraphClientError, TokenExpiredError
+from ..teams import _get_jwks, exchange_graph_token
 
 
 class ExternalCallLoggingTests(SimpleTestCase):

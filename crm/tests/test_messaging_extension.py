@@ -13,8 +13,8 @@ from django.test import Client, SimpleTestCase, TestCase, override_settings
 from botframework.connector.auth import AuthenticationConstants
 from PIL import Image
 
-from .messaging_extension import CARD_BYTE_LIMIT, COMMAND_ID, CONTACT_LIMIT, PAGE_SIZE
-from .models import Agent, Call, Company, Contact
+from ..messaging_extension import CARD_BYTE_LIMIT, COMMAND_ID, CONTACT_LIMIT, PAGE_SIZE
+from ..models import Agent, Call, Company, Contact
 
 
 TENANT = "22222222-2222-2222-2222-222222222222"

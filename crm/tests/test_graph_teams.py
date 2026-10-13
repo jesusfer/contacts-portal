@@ -22,11 +22,11 @@ from django.utils import timezone
 
 from config.settings import configure_oidc
 from config.urls import urlpatterns as project_patterns
-from .graph import GraphClient, GraphClientError, InvalidCursor, TokenExpiredError
-from .signals import AUTH_SOURCE_SESSION_KEY
-from .models import UserProfile
-from .openid_connect import TenantAwareOpenIDConnectOAuth2Adapter
-from .teams import GraphTokenManager, TeamsTokenError, validate_teams_token
+from ..graph import GraphClient, GraphClientError, InvalidCursor, TokenExpiredError
+from ..signals import AUTH_SOURCE_SESSION_KEY
+from ..models import UserProfile
+from ..openid_connect import TenantAwareOpenIDConnectOAuth2Adapter
+from ..teams import GraphTokenManager, TeamsTokenError, validate_teams_token
 
 
 class TeamsGraphFrontendTests(SimpleTestCase):
@@ -34,7 +34,7 @@ class TeamsGraphFrontendTests(SimpleTestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
-        source = Path(__file__).resolve().parent.parent / "frontend/src/teams.js"
+        source = Path(__file__).resolve().parent.parent.parent / "frontend/src/teams.js"
         result = subprocess.run(
             [node, "--input-type=module", "-e", f"""
 import assert from 'node:assert/strict'
@@ -100,7 +100,7 @@ assert.match(failure, /selection changed/)
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
-        source = Path(__file__).resolve().parent.parent / "frontend/src"
+        source = Path(__file__).resolve().parent.parent.parent / "frontend/src"
         result = subprocess.run(
             [node, "--input-type=module", "-e", f"""
 import assert from 'node:assert/strict'
@@ -162,7 +162,7 @@ for (const {{ options }} of requests) {{
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
-        module = (Path(__file__).resolve().parent.parent / "frontend/src/teams-graph.js").as_uri()
+        module = (Path(__file__).resolve().parent.parent.parent / "frontend/src/teams-graph.js").as_uri()
         result = subprocess.run(
             [node, "--input-type=module", "-e", f"""
 import assert from 'node:assert/strict'

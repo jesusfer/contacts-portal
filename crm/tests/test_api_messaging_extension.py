@@ -11,9 +11,9 @@ from django.contrib.auth import get_user_model
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from .api_messaging_extension import RESULT_LIMIT, SUMMARY_LIMIT
-from .messaging_extension import CARD_BYTE_LIMIT
-from .models import Agent, Appointment, Call, Company, Contact
+from ..api_messaging_extension import RESULT_LIMIT, SUMMARY_LIMIT
+from ..messaging_extension import CARD_BYTE_LIMIT
+from ..models import Agent, Appointment, Call, Company, Contact
 
 
 TENANT = "22222222-2222-2222-2222-222222222222"

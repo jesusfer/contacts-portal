@@ -13,8 +13,8 @@ from django.urls import path
 
 from config.settings import configure_oidc
 from config.urls import urlpatterns as project_urlpatterns
-from .adapters import SocialAccountAdapter
-from .signals import AUTH_SOURCE_SESSION_KEY
+from ..adapters import SocialAccountAdapter
+from ..signals import AUTH_SOURCE_SESSION_KEY
 
 
 PROVIDERS = configure_oidc(
