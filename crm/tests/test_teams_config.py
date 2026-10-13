@@ -6,9 +6,9 @@ from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from config.settings import GRAPH_SCOPES, TEAMS_CLIENT_IDS, configure_oidc
-from .middleware import TeamsFrameMiddleware
-from .models import Agent, Call, Company, Contact
-from .signals import AUTH_SOURCE_SESSION_KEY
+from ..middleware import TeamsFrameMiddleware
+from ..models import Agent, Call, Company, Contact
+from ..signals import AUTH_SOURCE_SESSION_KEY
 
 
 class TeamsConfigurationTests(SimpleTestCase):

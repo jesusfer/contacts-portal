@@ -9,7 +9,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 
-from .models import Agent, Appointment, Call, Company, Contact, Email
+from ..models import Agent, Appointment, Call, Company, Contact, Email
 
 
 class SeedDemoTests(TestCase):

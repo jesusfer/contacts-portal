@@ -23,9 +23,9 @@ from django.urls import resolve, reverse
 from django.utils import timezone
 
 from config.settings import configure_oidc
-from .adapters import AccountAdapter, SocialAccountAdapter
-from .forms import AppointmentForm, CallForm
-from .models import Agent, Appointment, Call, Company, Contact, Email
+from ..adapters import AccountAdapter, SocialAccountAdapter
+from ..forms import AppointmentForm, CallForm
+from ..models import Agent, Appointment, Call, Company, Contact, Email
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -603,7 +603,7 @@ class OIDCPageStylingTests(TestCase):
 
 class OIDCSettingsTests(TestCase):
     def test_authentication_templates_are_packaged_and_trigger_image_builds(self):
-        root = Path(__file__).resolve().parent.parent
+        root = Path(__file__).resolve().parent.parent.parent
         self.assertIn("COPY templates/ templates/", (root / "Dockerfile").read_text())
         workflow = (root / ".github" / "workflows" / "build-image.yml").read_text()
         self.assertIn('- "templates/**"', workflow)

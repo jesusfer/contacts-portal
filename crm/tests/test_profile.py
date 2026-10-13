@@ -12,8 +12,8 @@ from django.http.multipartparser import MultiPartParserError
 from django.test import Client, TestCase, override_settings
 from PIL import Image
 
-from .models import Agent, UserProfile
-from .signals import AUTH_SOURCE_SESSION_KEY
+from ..models import Agent, UserProfile
+from ..signals import AUTH_SOURCE_SESSION_KEY
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
