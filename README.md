@@ -286,6 +286,12 @@ the existing shared directory, not the agent's company memberships.
 Sending a card shares its contents with everyone in that conversation,
 including external participants; only share customer data with authorized
 recipients. Cards are snapshots and do not update after portal edits.
+The manifest also defines the **Log call summary** action command (`logCallSummary`),
+available from a message's **More actions** menu, the compose box, or the command box.
+A dialog asks the user to pick a customer, a contact, and one of their own calls with
+dropdowns, then to complete the call summary. When invoked from a message, the message
+text is prefilled as the summary (up to 4000 characters). Saving replaces the selected
+call's summary. Dropdowns show at most 100 entries; only the agent's own calls are offered.
 Test the deployed bot in Teams by searching a customer (including one with no
 contacts), selecting it, and sending its card.
 

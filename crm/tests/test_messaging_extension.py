@@ -124,6 +124,43 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(response["Cache-Control"], "private, no-store")
         self.assertEqual(self.agent.companies.count(), 0)
 
+    def action(self, name, **value):
+        value.setdefault("commandId", "logCallSummary")
+        return self.post(self.activity(name=name, value=value))
+
+    def test_action_command_flow_saves_summary_from_message(self):
+        call = self.agent.calls.get()
+        response = self.action("composeExtension/fetchTask", commandContext="message", messagePayload={
+            "body": {"contentType": "html", "content": "<p>Hello &amp; bye</p>"}})
+        self.assertEqual(response.status_code, 200)
+        card = response.json()["task"]["value"]["card"]["content"]
+        self.assertEqual(card["body"][1]["choices"], [{"title": "Acme", "value": str(self.company.pk)}])
+        data = card["actions"][0]["data"]
+        self.assertEqual(data["message"], "Hello & bye")
+        response = self.action("composeExtension/submitAction", data={
+            **data, "customer_id": str(self.company.pk)})
+        card = response.json()["task"]["value"]["card"]["content"]
+        data = card["actions"][0]["data"]
+        self.assertEqual(card["body"][1]["choices"][0]["value"], str(self.contact.pk))
+        response = self.action("composeExtension/submitAction", data={
+            **data, "contact_id": str(self.contact.pk)})
+        card = response.json()["task"]["value"]["card"]["content"]
+        self.assertEqual(card["body"][2]["value"], "Hello & bye")
+        data = card["actions"][0]["data"]
+        response = self.action("composeExtension/submitAction", data={
+            **data, "call_id": str(call.pk), "summary": "Done"})
+        self.assertEqual(response.json()["task"]["type"], "message")
+        call.refresh_from_db()
+        self.assertEqual(call.summary, "Done")
+
+    def test_action_command_rejects_other_agents_calls(self):
+        other = Agent.objects.create(user=get_user_model().objects.create_user("other"))
+        call = Call.objects.create(agent=other, contact=self.contact)
+        response = self.action("composeExtension/submitAction", data={
+            "step": "call", "contact_id": str(self.contact.pk), "call_id": str(call.pk), "summary": "x"})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.action("composeExtension/submitAction", data={"step": "x"}).status_code, 404)
+
     def test_empty_query_no_matches_and_customer_without_contacts(self):
         empty = Company.objects.create(name="Empty customer")
         result = self.post(self.activity(text="missing")).json()["composeExtension"]
@@ -235,7 +272,7 @@ class MessagingExtensionTests(TestCase):
 
     def test_other_channels_and_unsupported_invokes_are_rejected(self):
         self.assertEqual(self.post(self.activity(channelId="emulator")).status_code, 400)
-        self.assertEqual(self.post(self.activity(name="composeExtension/submitAction")).status_code, 501)
+        self.assertEqual(self.post(self.activity(name="composeExtension/anonymousQueryLink")).status_code, 501)
 
     def test_selection_rechecks_authorization_and_loads_current_details(self):
         self.contact.name = "Updated contact"
@@ -283,7 +320,11 @@ class MessagingExtensionManifestTests(SimpleTestCase):
     def test_manifest_matches_handler(self):
         manifest = self.manifest()
         extension, = manifest["composeExtensions"]
-        command, = extension["commands"]
+        command, action = extension["commands"]
+        self.assertEqual(action["id"], "logCallSummary")
+        self.assertEqual(action["type"], "action")
+        self.assertTrue(action["fetchTask"])
+        self.assertIn("message", action["context"])
         self.assertEqual(command["id"], COMMAND_ID)
         self.assertEqual(command["type"], "query")
         self.assertIn("compose", command["context"])
