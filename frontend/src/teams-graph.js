@@ -1,6 +1,15 @@
 const scopes = ['User.Read', 'Calendars.Read', 'Mail.Read', 'Presence.Read']
 let client
 
+/**
+ * Start the Teams nested-app authentication flow and bind Graph access to the
+ * expected Entra tenant and user identity.
+ * @param {{client_id: string, tenant_id: string}} provider OIDC provider details.
+ * @param {string} expectedId Expected Entra object ID for the signed-in user.
+ * @param {AbortSignal} [signal] Signal used to cancel setup between async steps.
+ * @returns {Promise<void>}
+ * @throws {Error} If authentication or identity validation fails.
+ */
 export async function startTeamsGraph(provider, expectedId, signal) {
   clearTeamsGraph()
   const [{ App }, me] = await Promise.all([
@@ -40,9 +49,21 @@ export async function startTeamsGraph(provider, expectedId, signal) {
   client = { app, me }
 }
 
+/** Clear the in-memory Teams Graph client. */
 export function clearTeamsGraph() { client = undefined }
+
+/** Check whether a Teams Graph client is currently initialized. */
 export function teamsGraphActive() { return !!client }
 
+/**
+ * Validate a Graph pagination link and merge its paging values with fixed query
+ * parameters.
+ * @param {string} link The Graph-provided next-page URL.
+ * @param {string} endpoint The expected Graph endpoint path.
+ * @param {Record<string, string>} params Original fixed query parameters.
+ * @returns {Record<string, string>} Query parameters for the next page.
+ * @throws {Error} If the URL is not a valid page link for the expected request.
+ */
 export function graphPageQuery(link, endpoint, params) {
   const url = new URL(link)
   const query = Object.fromEntries(url.searchParams)
@@ -58,12 +79,26 @@ export function graphPageQuery(link, endpoint, params) {
   return { ...params, ...query }
 }
 
+/**
+ * Convert a Microsoft Graph UTC date-time object to an ISO timestamp.
+ * @param {{dateTime?: string, timeZone?: string}} value Graph date-time value.
+ * @returns {string} The date and time as an ISO timestamp.
+ * @throws {Error} If the value is missing or uses an unsupported time zone.
+ */
 function eventTime(value) {
   if (!value?.dateTime || !['UTC', 'Etc/UTC'].includes(value.timeZone)) throw new Error('Invalid Microsoft Graph event time.')
   const date = new Date(/(?:[zZ]|[+-]\d\d:\d\d)$/.test(value.dateTime) ? value.dateTime : `${value.dateTime}Z`)
   return date.toISOString()
 }
 
+/**
+ * Run a supported read-only Graph request through the active Teams client.
+ * Supports presence, profile, calendar, and inbox data, with validated paging.
+ * @param {string} path Internal Graph request path and query string.
+ * @param {{signal?: AbortSignal}} [options] Optional request cancellation signal.
+ * @returns {Promise<object>} A normalized profile, presence, event, or email result.
+ * @throws {Error} If Graph is not initialized, the path is unsupported, or data is invalid.
+ */
 export async function teamsGraphRequest(path, { signal } = {}) {
   if (!client) throw new Error('Microsoft Graph is not initialized. Sign in with Teams again.')
   const { app, me } = client
@@ -129,6 +164,12 @@ export async function teamsGraphRequest(path, { signal } = {}) {
   }
 }
 
+/**
+ * Fetch the signed-in user's Graph profile photo.
+ * @param {AbortSignal} [signal] Optional request cancellation signal.
+ * @returns {Promise<Blob|null>} The photo data, or `null` if unavailable/not found.
+ * @throws {Error} If Graph returns an error other than not found.
+ */
 export async function teamsGraphPhoto(signal) {
   if (!client) return null
   try {
