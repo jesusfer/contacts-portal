@@ -34,11 +34,15 @@ class TeamsGraphFrontendTests(SimpleTestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
-        source = Path(__file__).resolve().parent.parent.parent / "frontend/src/teams.js"
+        source = Path(__file__).resolve().parent.parent.parent / "frontend/src/teams.ts"
+        compiler = source.parents[1] / "node_modules/typescript/lib/typescript.js"
+        if not compiler.is_file():
+            self.skipTest("npm ci is required for frontend validation.")
         result = subprocess.run(
             [node, "--input-type=module", "-e", f"""
 import assert from 'node:assert/strict'
 import {{ readFileSync }} from 'node:fs'
+import ts from {json.dumps(str(compiler))}
 globalThis.window = {{ location: {{ origin: 'https://portal.example.com' }} }}
 let save, saved, valid, selection, failure, success
 const previous = {{ contentUrl: 'https://portal.example.com/teams/customer/?provider=entraid-work&customer=42' }}
@@ -53,7 +57,7 @@ globalThis.sdkMock = {{
     }},
   }},
 }}
-const code = readFileSync({json.dumps(str(source))}, 'utf8')
+const code = ts.transpileModule(readFileSync({json.dumps(str(source))}, 'utf8'), {{ compilerOptions: {{ module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }} }}).outputText
   .replaceAll("import('@microsoft/teams-js')", 'Promise.resolve(globalThis.sdkMock)')
 const teams = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))
 assert.deepEqual(await teams.getTeamsTabConfig(), previous)
@@ -101,10 +105,14 @@ assert.match(failure, /selection changed/)
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
         source = Path(__file__).resolve().parent.parent.parent / "frontend/src"
+        compiler = source.parent / "node_modules/typescript/lib/typescript.js"
+        if not compiler.is_file():
+            self.skipTest("npm ci is required for frontend validation.")
         result = subprocess.run(
             [node, "--input-type=module", "-e", f"""
 import assert from 'node:assert/strict'
 import {{ readFileSync }} from 'node:fs'
+import ts from {json.dumps(str(compiler))}
 globalThis.window = {{ location: {{ origin: 'https://portal.example.com' }} }}
 globalThis.document = {{ cookie: 'csrftoken=csrf-test' }}
 let account = {{ tenantId: 'tenant' }}
@@ -121,7 +129,7 @@ class App {{
 }}
 globalThis.sdkMock = {{ App }}
 globalThis.meMock = {{ get: {{}} }}
-const code = readFileSync({json.dumps(str(source / 'teams-graph.js'))}, 'utf8')
+const code = ts.transpileModule(readFileSync({json.dumps(str(source / 'teams-graph.ts'))}, 'utf8'), {{ compilerOptions: {{ module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }} }}).outputText
   .replace("import('@microsoft/teams.client')", 'Promise.resolve(globalThis.sdkMock)')
   .replace("import('@microsoft/teams.graph-endpoints/me')", 'Promise.resolve(globalThis.meMock)')
 const graph = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))
@@ -140,7 +148,8 @@ const controller = new AbortController()
 controller.abort()
 await assert.rejects(graph.startTeamsGraph(provider, 'object', controller.signal))
 assert.equal(graph.teamsGraphActive(), false)
-const teams = await import({json.dumps((source / 'teams.js').as_uri())})
+const teamsCode = ts.transpileModule(readFileSync({json.dumps(str(source / 'teams.ts'))}, 'utf8'), {{ compilerOptions: {{ module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }} }}).outputText
+const teams = await import('data:text/javascript;base64,' + Buffer.from(teamsCode).toString('base64'))
 let requests = []
 globalThis.fetch = async (url, options) => {{
   requests.push({{ url, options }})
@@ -162,11 +171,17 @@ for (const {{ options }} of requests) {{
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
-        module = (Path(__file__).resolve().parent.parent.parent / "frontend/src/teams-graph.js").as_uri()
+        source = Path(__file__).resolve().parent.parent.parent / "frontend/src"
+        compiler = source.parent / "node_modules/typescript/lib/typescript.js"
+        if not compiler.is_file():
+            self.skipTest("npm ci is required for frontend validation.")
         result = subprocess.run(
             [node, "--input-type=module", "-e", f"""
 import assert from 'node:assert/strict'
-import {{ graphPageQuery, clearTeamsGraph, teamsGraphActive, teamsGraphRequest }} from {json.dumps(module)}
+import {{ readFileSync }} from 'node:fs'
+import ts from {json.dumps(str(compiler))}
+const code = ts.transpileModule(readFileSync({json.dumps(str(source / 'teams-graph.ts'))}, 'utf8'), {{ compilerOptions: {{ module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }} }}).outputText
+const {{ graphPageQuery, clearTeamsGraph, teamsGraphActive, teamsGraphRequest }} = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))
 const endpoint = '/me/calendarView'
 const params = {{ startDateTime: '2026-10-01T00:00:00Z', $top: '50' }}
 const link = 'https://graph.microsoft.com/v1.0/me/calendarView?$skiptoken=next'
