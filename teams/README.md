@@ -1,0 +1,1 @@
+The manifests must be separated because each manifest can have only one messaging extension.
