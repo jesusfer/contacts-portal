@@ -447,6 +447,98 @@ Verify with a real tenant:
    third-party cookies. An unprovisioned user must not gain CRM directory or
    activity access.
 
+## Messaging extension request flows
+
+The compose extensions run through Teams and Django; they do not call the portal
+SPA. The combined bot app has a customer-search query and a call-summary action.
+The separate Contact Cards app uses the API-based extension framework and its
+own endpoint.
+
+### Bot-based customer search and call-summary action
+
+```mermaid
+sequenceDiagram
+   actor User
+   participant Teams as Teams compose extension
+   participant Django as POST /api/teams/messages/
+   participant Bot as bot.messages / Bot Framework adapter
+   participant Handler as CustomerMessagingExtension
+   participant Auth as authorize
+   participant Search as search.handle_search
+   participant Action as action.handle_action
+   participant DB as CRM database
+
+   User->>Teams: Search customers (searchCustomers)
+   Teams->>Django: composeExtension/query + channel bearer token
+   Django->>Bot: messages validates request, process_activity
+   Bot->>Bot: Verify channel JWT (channel_claims_only)
+   Bot->>Handler: on_invoke_activity
+   Handler->>Auth: Verify tenant, Entra oid/tid, linked Agent
+   Handler->>Search: handle_search(query)
+   Search->>DB: search_customers(searchText, page)
+   DB-->>Search: Matching companies + contact counts
+   Search-->>Teams: Preview cards (customer_card, result_response)
+   User->>Teams: Select a customer card
+   Teams->>Django: composeExtension/selectItem
+   Django->>Handler: Authenticated invoke
+   Handler->>Search: handle_search(selectItem)
+   Search->>DB: selected_customer(customer_id)
+   Search-->>Teams: Detail card with bounded contacts
+
+   User->>Teams: Open Log call summary
+   Teams->>Django: composeExtension/fetchTask
+   Django->>Handler: Authenticated invoke
+   Handler->>Action: handle_action(fetchTask)
+   Action->>DB: customer_step(agent), then contact_step and call_step
+   Action-->>Teams: Adaptive Card task dialog
+   User->>Teams: Submit customer, contact, call, and summary
+   Teams->>Django: composeExtension/submitAction
+   Django->>Handler: Authenticated invoke
+   Handler->>Action: handle_action(submitAction)
+   Action->>DB: Recheck agent scope; append summary to own call
+   Action-->>Teams: Confirmation task response
+```
+
+Each invoke is authenticated as a Bot Framework channel request before
+`CustomerMessagingExtension.on_invoke_activity` routes it. `authorize` matches
+the verified Teams tenant and Entra object ID to a linked, provisioned agent;
+browser sessions are not used. Search results use the shared company/contact
+directory, while the action only offers the agent's associated customers,
+their contacts, and that agent's calls.
+
+The portal's related tab frontend uses `initializeTeams`,
+`getTeamsAuthToken`, and `exchangeTeamsToken` in `frontend/src/teams.ts`;
+those functions serve tab SSO and are **not** called by either compose
+extension. The Teams host renders the extension results and task dialog.
+
+### API-based Contact Cards search
+
+```mermaid
+sequenceDiagram
+   actor User
+   participant Teams as Contact Cards extension
+   participant API as GET /api/teams/contact-search/
+   participant Backend as api.search_contacts
+   participant Auth as validate_teams_token / get_teams_account
+   participant DB as CRM database
+   participant Template as Teams card template
+
+   User->>Teams: Search contact, customer, or email
+   Teams->>API: searchContacts(query) + Entra bearer token
+   API->>Backend: Dispatch request
+   Backend->>Auth: Verify delegated token and linked active agent
+   Backend->>DB: Filter contacts; fetch that agent's latest three calls
+   DB-->>Backend: Matching contacts and calls
+   Backend->>Backend: call_history and plain_text
+   Backend-->>Teams: JSON contact results
+   Teams->>Template: Render response with contact-card-template.json
+   Template-->>User: Preview cards to select and insert
+```
+
+This app does not use the bot endpoint or portal frontend functions. Its
+OpenAPI operation and response-rendering template define the Teams-to-backend
+contract; `search_contacts` returns only the requesting agent's call history.
+
 Automated validation uses the existing Django test/check commands and frontend
 build described in README.md. Graph/SSO tests mock Microsoft endpoints; real
 Teams client/tenant testing is required before production rollout.
