@@ -1,5 +1,7 @@
 """HTTP views for Teams configuration, sign-in, and customer access."""
 
+import msal
+
 from allauth.core import ratelimit
 from django.conf import settings
 from django.contrib.auth import login
@@ -143,7 +145,10 @@ def _teams_auth(request, *, graph_only=False):
         if graph_only:
             return JsonResponse({"id": claims["oid"], "tenant_id": tenant})
         account = get_teams_account(provider_id, claims)
-        token = exchange_graph_token(app, assertion=data["token"], tenant_id=tenant)
+        token_cache = msal.SerializableTokenCache()
+        token = exchange_graph_token(
+            app, assertion=data["token"], tenant_id=tenant, token_cache=token_cache
+        )
         profile_data = GraphClient(token["access_token"], tenant).get_profile()
         if profile_data.get("id") != claims["oid"]:
             raise TeamsTokenError("Graph identity does not match the Teams identity.")
@@ -157,10 +162,11 @@ def _teams_auth(request, *, graph_only=False):
             request,
             provider_id,
             token["access_token"],
-            token.get("refresh_token"),
+            None,
             token["expires_in"],
             tenant,
             oid=claims["oid"],
+            token_cache=token_cache,
         )
         request.session["crm_teams_authenticated"] = True
         graph_profile_json(request, profile_data)

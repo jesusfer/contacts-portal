@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import jwt
+from asgiref.sync import async_to_sync
 from allauth.socialaccount.models import SocialAccount
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.conf import settings
@@ -13,12 +14,23 @@ from django.test import Client, SimpleTestCase, TestCase, override_settings
 from botbuilder.schema import ResourceResponse
 from botframework.connector.auth import AuthenticationConstants
 from PIL import Image
+from microsoft_teams.api import InvokeResponse, MessagingExtensionAttachment
+from microsoft_teams.cards import AdaptiveCard, Choice, ChoiceSetInput, SubmitAction
 
+from ..teams.messaging_extension.action import (
+    SUMMARY_LIMIT,
+    _choice_step,
+    summary_step,
+    task_response,
+)
+from ..teams.messaging_extension.bot import channel_claims_only
 from ..teams.messaging_extension.search import (
     CARD_BYTE_LIMIT,
     COMMAND_ID,
     CONTACT_LIMIT,
     PAGE_SIZE,
+    customer_card,
+    result_response,
 )
 from ..models import Agent, Call, Company, Contact
 
@@ -29,6 +41,153 @@ APP_ID = "11111111-1111-1111-1111-111111111111"
 SERVICE_URL = "https://smba.trafficmanager.net/teams/"
 PROVIDER = "entraid-work"
 ENDPOINT = "/api/teams/messages/"
+
+
+class TeamsSDKSerializationTests(SimpleTestCase):
+    def assert_card_schema(self, card):
+        self.assertEqual(
+            card["$schema"], "http://adaptivecards.io/schemas/adaptive-card.json"
+        )
+        self.assertEqual(card["type"], "AdaptiveCard")
+        self.assertEqual(card["version"], "1.3")
+        self.assertNotIn("schema", card)
+
+    def test_customer_card_serializes_sdk_elements_without_null_defaults(self):
+        card = customer_card(
+            SimpleNamespace(pk=7, name="Acme", contact_count=0, card_contacts=[])
+        )
+        self.assert_card_schema(card)
+        self.assertEqual(
+            card["body"],
+            [
+                {
+                    "type": "TextBlock",
+                    "text": "Acme",
+                    "weight": "Bolder",
+                    "size": "Large",
+                    "wrap": True,
+                },
+                {
+                    "type": "FactSet",
+                    "facts": [
+                        {"title": "Customer ID", "value": "7"},
+                        {"title": "Contacts", "value": "0"},
+                    ],
+                },
+                {"type": "TextBlock", "text": "No contacts recorded.", "wrap": True},
+            ],
+        )
+        self.assertEqual(set(card), {"$schema", "type", "version", "body"})
+
+    def test_choice_card_uses_sdk_models_and_preserves_wire_aliases(self):
+        card = _choice_step(
+            "customer",
+            "Select a customer.",
+            "customer_id",
+            "Customer",
+            [Choice(title="Acme", value="7")],
+            {"message": "Hello"},
+        )
+        self.assertIsInstance(card, AdaptiveCard)
+        self.assertIsInstance(card.body[1], ChoiceSetInput)
+        self.assertIsInstance(card.actions[0], SubmitAction)
+        response = task_response(card)
+        self.assertIsInstance(response, InvokeResponse)
+        task = response.body["task"]
+        self.assertEqual(task["type"], "continue")
+        self.assertEqual(
+            {key: task["value"][key] for key in ("title", "width", "height")},
+            {"title": "Log call summary", "width": "medium", "height": "medium"},
+        )
+        content = task["value"]["card"]["content"]
+        self.assert_card_schema(content)
+        self.assertEqual(
+            content["body"][1],
+            {
+                "type": "Input.ChoiceSet",
+                "id": "customer_id",
+                "label": "Customer",
+                "style": "compact",
+                "isRequired": True,
+                "errorMessage": "Select an option.",
+                "choices": [{"title": "Acme", "value": "7"}],
+            },
+        )
+        self.assertEqual(
+            content["actions"],
+            [
+                {
+                    "type": "Action.Submit",
+                    "title": "Next",
+                    "data": {"message": "Hello", "step": "customer"},
+                }
+            ],
+        )
+        self.assertEqual(json.loads(json.dumps(response.body)), response.body)
+
+    def test_summary_and_final_responses_are_plain_json_with_sdk_aliases(self):
+        call = SimpleNamespace(pk=9, contact_id=8, summary="Existing")
+        response = summary_step(call, "New")
+        card = response.body["task"]["value"]["card"]["content"]
+        self.assert_card_schema(card)
+        self.assertEqual(
+            card["body"][1],
+            {
+                "type": "Input.Text",
+                "id": "summary",
+                "label": "Summary",
+                "isMultiline": True,
+                "isRequired": True,
+                "errorMessage": "Enter a summary.",
+                "maxLength": SUMMARY_LIMIT,
+                "value": "Existing\n\nNew",
+            },
+        )
+        self.assertEqual(
+            card["actions"][0]["data"],
+            {"step": "summary", "contact_id": "8", "call_id": "9"},
+        )
+        self.assertEqual(
+            task_response(message="Call summary saved.").body,
+            {"task": {"type": "message", "value": "Call summary saved."}},
+        )
+
+    def test_result_response_serializes_sdk_attachments(self):
+        response = result_response(
+            [
+                MessagingExtensionAttachment(
+                    content_type="application/vnd.microsoft.card.adaptive",
+                    content={"type": "AdaptiveCard", "version": "1.3"},
+                )
+            ]
+        )
+        self.assertIsInstance(response, InvokeResponse)
+        self.assertEqual(
+            response.body,
+            {
+                "composeExtension": {
+                    "type": "result",
+                    "attachmentLayout": "list",
+                    "attachments": [
+                        {
+                            "contentType": "application/vnd.microsoft.card.adaptive",
+                            "content": {"type": "AdaptiveCard", "version": "1.3"},
+                        }
+                    ],
+                }
+            },
+        )
+
+    def test_channel_claims_reject_emulator_and_skill_issuers(self):
+        validator = async_to_sync(channel_claims_only)
+        validator({"iss": AuthenticationConstants.TO_BOT_FROM_CHANNEL_TOKEN_ISSUER})
+        for issuer in (
+            None,
+            f"https://sts.windows.net/{TENANT}/",
+            f"https://login.microsoftonline.com/{TENANT}/v2.0",
+        ):
+            with self.subTest(issuer=issuer), self.assertRaises(PermissionError):
+                validator({"iss": issuer, "aud": APP_ID, "appid": APP_ID})
 
 
 @override_settings(
@@ -159,6 +318,11 @@ class MessagingExtensionTests(TestCase):
             attachment["contentType"], "application/vnd.microsoft.card.adaptive"
         )
         self.assertEqual(attachment["content"]["type"], "AdaptiveCard")
+        self.assertEqual(attachment["content"]["version"], "1.3")
+        self.assertEqual(
+            attachment["content"]["$schema"],
+            "http://adaptivecards.io/schemas/adaptive-card.json",
+        )
         content = json.dumps(attachment["content"])
         self.assertIn("Alice", content)
         self.assertIn("alice@example", content)

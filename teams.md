@@ -177,6 +177,40 @@ Graph client.
 
 ## Authentication: Teams SSO, OBO, and SDK tokens
 
+### Python SDK boundaries
+
+The backend uses the Microsoft Teams Python SDK packages (`microsoft-teams-api`,
+`microsoft-teams-cards`, and `microsoft-teams-graph`). Their 2.1 release line
+supports Python 3.11–3.x, including this project's Python 3.12 runtime.
+
+- Teams API models describe messaging-extension results and task responses;
+  Teams card models build Adaptive Cards with Teams-compatible wire aliases.
+  Existing card version, text escaping, choice limits, and byte limits remain
+  application policy.
+- The Django bot endpoint retains Bot Framework activity parsing and its
+  channel-JWT adapter. `microsoft-teams-botbuilder` is not installed: its bridge
+  requires a `CloudAdapter` and HTTP-server integration rather than wrapping
+  the current Django `BotFrameworkAdapter`. Adopting it would require a
+  separate authentication/error-handling migration. SDK activity unions also
+  impose additional required fields and known-invoke discriminators; retaining
+  the channel parser preserves existing malformed-request and unsupported-invoke
+  behavior.
+- `microsoft-teams-graph` supplies the delegated `AuthProvider` for the Microsoft
+  Graph SDK's profile, photo, calendar, Inbox, and presence request builders.
+  A custom HTTPX transport retains the portal's `requests` transport, fixed
+  Graph destinations, ten-second timeout, disabled redirects, and metadata-only
+  external-call logging. A Kiota response handler leaves JSON validation,
+  response normalization, and signed, identity-bound pagination in the portal.
+- MSAL Python handles confidential-client OBO acquisition and token renewal.
+  It does **not** validate incoming portal access tokens. Teams SSO still
+  verifies signatures and all required claims before authorizing a linked
+  active account; bot-channel authentication is separate from Entra SSO.
+
+SDKs do not implement CRM permissions: customer access still requires the
+authorized agent's company membership, and call-summary updates require that
+agent's own call. No additional Graph permissions or application-only access
+are introduced.
+
 ### Teams portal sign-in: server-side OBO
 
 Legacy startup and the explicit full-dashboard action perform this sequence:
@@ -190,12 +224,11 @@ Legacy startup and the explicit full-dashboard action perform this sequence:
    timestamps, tenant, `access_as_user` scope, and authorized Teams client.
    It matches the verified `oid`/`tid` to an explicitly linked, active OIDC
    account; it does not trust an email address or Teams context ID for linking.
-4. Django performs **on-behalf-of (OBO)** at
-   `https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token`, using the
-   configured client ID and server-only client secret, the portal token as the
-   `assertion`, `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`,
-   `requested_token_use=on_behalf_of`, and scope
-   `https://graph.microsoft.com/.default offline_access`.
+4. Django uses MSAL's confidential client to perform **on-behalf-of (OBO)**
+   against the verified tenant authority, using the configured client ID,
+   server-only client secret, and portal token as the user assertion.
+   The requested Graph scope is `https://graph.microsoft.com/.default`;
+   MSAL handles its reserved OIDC scopes, including `offline_access`.
 5. Entra returns a delegated **Graph** access token and, when available, a
    refresh token. Django calls Graph `/me` with that access token and requires
    its ID to match the verified Teams token's `oid`.
@@ -235,12 +268,20 @@ access/refresh tokens in the server-side session. Without an active Teams SDK
 client, frontend Graph reads call Django, which attaches the server-held token.
 
 For either kind of server Graph session, Django reuses an access token while
-more than 60 seconds of validity remain. Otherwise, it uses the stored refresh
-token at the tenant token endpoint with `grant_type=refresh_token`; this is
-**token renewal, not another OBO exchange**. If a stored object ID exists, Django
-checks `/me` again after renewal. Missing refresh tokens, revoked authorization,
-or identity mismatch require signing in again. SDK/MSAL manages its own token
-acquisition separately from this server renewal path.
+more than 60 seconds of validity remain. Otherwise, MSAL renews the token from
+the session's serialized token cache. Existing allauth refresh credentials are
+imported through MSAL's refresh-token migration API; subsequent renewals use
+the cache, including rotated refresh credentials. This is **token renewal, not
+another OBO exchange**. If a stored object ID exists, Django checks `/me` again
+after renewal.
+
+Each server-side cache is bound to the signed-in user, OIDC provider, tenant,
+and client ID; it is never shared globally or sent to the browser. Signed-cookie
+sessions are rejected for Graph credential storage. Existing sessions without
+the new identity binding require signing in again. Missing refresh credentials,
+revoked authorization, or identity mismatch also require signing in again.
+Frontend SDK/MSAL manages its own token acquisition separately from this server
+renewal path.
 
 The retained server Graph code is therefore still used and cannot simply be
 deleted: ordinary browser Graph views, full-dashboard Teams SSO, and portal
