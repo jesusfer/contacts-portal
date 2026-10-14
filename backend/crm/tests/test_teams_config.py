@@ -206,6 +206,7 @@ class TeamsCustomerTests(TestCase):
         self.user = get_user_model().objects.create_user("agent")
         self.agent = Agent.objects.create(user=self.user)
         self.company = Company.objects.create(name="Customer")
+        self.agent.companies.add(self.company)
         self.other_company = Company.objects.create(name="Other customer")
         self.contact = Contact.objects.create(
             name="Alice", email="alice@example.com", company=self.company
@@ -225,7 +226,7 @@ class TeamsCustomerTests(TestCase):
         session["crm_teams_authenticated"] = True
         session.save()
 
-    def test_customer_contacts_are_shared_but_calls_are_agent_scoped(self):
+    def test_customer_contacts_are_linked_and_calls_are_agent_scoped(self):
         response = self.client.get(
             f"/api/teams/customers/{self.company.pk}/?provider=entraid-work"
         )
@@ -242,7 +243,26 @@ class TeamsCustomerTests(TestCase):
             "/api/teams/customers/?provider=entraid-work"
         ).json()["customers"]
         self.assertEqual(
-            {item["id"] for item in customers}, {self.company.pk, self.other_company.pk}
+            {item["id"] for item in customers}, {self.company.pk}
+        )
+
+    def test_unlinked_and_removed_customer_are_not_accessible(self):
+        self.assertEqual(
+            self.client.get(
+                f"/api/teams/customers/{self.other_company.pk}/?provider=entraid-work"
+            ).status_code,
+            404,
+        )
+        self.agent.companies.clear()
+        self.assertEqual(
+            self.client.get(
+                f"/api/teams/customers/{self.company.pk}/?provider=entraid-work"
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get("/api/teams/customers/?provider=entraid-work").json()["customers"],
+            [],
         )
 
     def test_require_authentication_and_matching_teams_sso_session(self):
@@ -282,6 +302,7 @@ class TeamsCustomerTests(TestCase):
 
     def test_empty_customer_and_read_only_endpoints(self):
         empty = Company.objects.create(name="Empty")
+        self.agent.companies.add(empty)
         data = self.client.get(
             f"/api/teams/customers/{empty.pk}/?provider=entraid-work"
         ).json()

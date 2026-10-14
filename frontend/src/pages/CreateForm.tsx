@@ -111,7 +111,8 @@ export function CreateForm({ type, initialId, done, close }: CreateFormProps) {
             <input name="name" autoComplete="organization" required maxLength={200} />
           </label>
           <p class="form-help">
-            Add an organization to the shared company directory. You can then assign contacts to it.
+            Add an organization and link it to your agent account. You can then assign contacts to
+            it.
           </p>
         </>
       ) : type === 'contact' ? (
@@ -136,8 +137,8 @@ export function CreateForm({ type, initialId, done, close }: CreateFormProps) {
             </select>
           </label>
           <p class="form-help">
-            Choose the contact's organization, not necessarily your employer. Companies and contacts
-            are shared; your conversations remain private to you.
+            Choose one of your linked companies. Contacts are visible to agents linked to that
+            company; your conversations remain private to you.
           </p>
         </>
       ) : (

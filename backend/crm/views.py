@@ -427,34 +427,45 @@ def session_logout(request):
     return JsonResponse(session_json(request))
 
 
-def directory_contacts():
-    return Contact.objects.select_related("company")
+def directory_contacts(request):
+    return Contact.objects.filter(
+        company__in=request.agent.companies.all()
+    ).select_related("company")
 
 
 def scoped_calls(request):
-    return Call.objects.filter(agent=request.agent).select_related(
+    return Call.objects.filter(
+        agent=request.agent, contact__company__in=request.agent.companies.all()
+    ).select_related(
         "contact__company", "appointment"
     )
 
 
 def scoped_appointments(request):
-    return Appointment.objects.filter(call__agent=request.agent).select_related(
+    return Appointment.objects.filter(
+        call__agent=request.agent,
+        call__contact__company__in=request.agent.companies.all(),
+    ).select_related(
         "call__contact__company"
     )
 
 
 def scoped_emails(request):
-    return Email.objects.filter(agent=request.agent).select_related("contact")
+    return Email.objects.filter(
+        agent=request.agent, contact__company__in=request.agent.companies.all()
+    ).select_related("contact")
 
 
 @api(["GET", "POST"])
 def companies(request):
     if request.method == "GET":
         return JsonResponse(
-            {"companies": [company_json(item) for item in Company.objects.all()]}
+            {"companies": [company_json(item) for item in request.agent.companies.all()]}
         )
     data = payload(request, {"name": TEXT}, required=("name",))
-    company = save_form(CompanyForm, Company(), data)
+    with transaction.atomic():
+        company = save_form(CompanyForm, Company(), data)
+        request.agent.companies.add(company)
     return JsonResponse(company_json(company), status=201)
 
 
@@ -462,14 +473,14 @@ def companies(request):
 def contacts(request):
     if request.method == "GET":
         return JsonResponse(
-            {"contacts": [contact_json(item) for item in directory_contacts()]}
+            {"contacts": [contact_json(item) for item in directory_contacts(request)]}
         )
     data = payload(
         request,
         {"name": TEXT, "email": TEXT, "company_id": ID},
         required=("name", "email", "company_id"),
     )
-    company = get_object_or_404(Company, pk=data.pop("company_id"))
+    company = get_object_or_404(request.agent.companies.all(), pk=data.pop("company_id"))
     contact = save_form(ContactForm, Contact(company=company), data)
     return JsonResponse(contact_json(contact), status=201)
 
@@ -485,7 +496,7 @@ def calls(request):
         {"contact_id": ID, "status": TEXT, "summary": TEXT, "rating": RATING},
         required=("contact_id",),
     )
-    contact = get_object_or_404(directory_contacts(), pk=data.pop("contact_id"))
+    contact = get_object_or_404(directory_contacts(request), pk=data.pop("contact_id"))
     call = save_form(CallForm, Call(agent=request.agent, contact=contact), data)
     return JsonResponse(call_json(call), status=201)
 
@@ -555,7 +566,7 @@ def inbox(request):
         },
         required=("contact_id", "subject"),
     )
-    contact = get_object_or_404(directory_contacts(), pk=data.pop("contact_id"))
+    contact = get_object_or_404(directory_contacts(request), pk=data.pop("contact_id"))
     email = save_form(
         EmailForm,
         Email(agent=request.agent, contact=contact, received_at=timezone.now()),

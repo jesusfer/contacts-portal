@@ -175,10 +175,10 @@ class APITests(TestCase):
             401,
         )
 
-    def test_shared_contact_directory_and_creation_for_selected_company(self):
+    def test_linked_contact_directory_and_creation_for_selected_company(self):
         result = self.client.get("/api/contacts/").json()["contacts"]
         self.assertEqual(
-            [item["id"] for item in result], [self.contact.id, self.other_contact.id]
+            [item["id"] for item in result], [self.contact.id]
         )
         response = self.send(
             "post",
@@ -186,11 +186,24 @@ class APITests(TestCase):
             {
                 "name": "New",
                 "email": "new@example.com",
-                "company_id": self.other_company.id,
+                "company_id": self.company.id,
             },
         )
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["company"]["id"], self.other_company.id)
+        self.assertEqual(response.json()["company"]["id"], self.company.id)
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/contacts/",
+                {
+                    "name": "Forbidden",
+                    "email": "forbidden@example.com",
+                    "company_id": self.other_company.id,
+                },
+            ).status_code,
+            404,
+        )
+        self.assertFalse(Contact.objects.filter(name="Forbidden").exists())
         self.assertEqual(
             self.send(
                 "post",
@@ -229,13 +242,12 @@ class APITests(TestCase):
             400,
         )
 
-    def test_shared_company_directory_and_creation(self):
+    def test_linked_company_directory_and_creation(self):
         result = self.client.get("/api/companies/").json()["companies"]
         self.assertEqual(
             result,
             [
                 {"id": self.company.id, "name": "First"},
-                {"id": self.other_company.id, "name": "Second"},
             ],
         )
         response = self.send("post", "/api/companies/", {"name": "Third"})
@@ -243,7 +255,28 @@ class APITests(TestCase):
         self.assertEqual(response.json()["name"], "Third")
         self.agent.refresh_from_db()
         self.assertEqual(
-            list(self.agent.companies.values_list("id", flat=True)), [self.company.id]
+            list(self.agent.companies.values_list("id", flat=True)),
+            [self.company.id, response.json()["id"]],
+        )
+        self.assertEqual(len(self.client.get("/api/companies/").json()["companies"]), 2)
+        self.assertEqual(
+            self.client.get("/api/session/").json()["agent"]["companies"],
+            self.client.get("/api/companies/").json()["companies"],
+        )
+        self.assertFalse(
+            self.peer_agent.companies.filter(pk=response.json()["id"]).exists()
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/contacts/",
+                {
+                    "name": "New customer contact",
+                    "email": "new@example.com",
+                    "company_id": response.json()["id"],
+                },
+            ).status_code,
+            201,
         )
         self.assertEqual(
             self.send("post", "/api/companies/", {"name": ""}).status_code, 400
@@ -291,13 +324,27 @@ class APITests(TestCase):
                 self.send("patch", f"/api/inbox/{email.id}/", {}).status_code, 404
             )
 
-    def test_cross_company_contacts_allowed_and_activity_relations_owned(self):
+    def test_unlinked_contacts_rejected_and_activity_relations_owned(self):
         response = self.send(
             "post", "/api/calls/", {"contact_id": self.other_contact.id}
         )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(
+            Call.objects.filter(agent=self.agent, contact=self.other_contact).exists()
+        )
+        response = self.send(
+            "post",
+            "/api/inbox/",
+            {"contact_id": self.other_contact.id, "subject": "Bad"},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(
+            Email.objects.filter(agent=self.agent, contact=self.other_contact).exists()
+        )
+        response = self.send("post", "/api/calls/", {"contact_id": self.contact.id})
         self.assertEqual(response.status_code, 201)
         self.assertEqual(
-            response.json()["contact"]["company"]["id"], self.other_company.id
+            response.json()["contact"]["company"]["id"], self.company.id
         )
         self.assertEqual(
             Call.objects.get(pk=response.json()["id"]).agent_id, self.agent.id
@@ -307,7 +354,7 @@ class APITests(TestCase):
         response = self.send(
             "post",
             "/api/inbox/",
-            {"contact_id": self.other_contact.id, "subject": "Bad"},
+            {"contact_id": self.contact.id, "subject": "Allowed"},
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(
@@ -366,6 +413,126 @@ class APITests(TestCase):
                 },
             ).status_code,
             400,
+        )
+
+    def test_multiple_company_links_allow_contacts_and_owned_activity(self):
+        self.agent.companies.add(self.other_company)
+        self.assertEqual(
+            [item["id"] for item in self.client.get("/api/contacts/").json()["contacts"]],
+            [self.contact.id, self.other_contact.id],
+        )
+        self.assertEqual(
+            [item["id"] for item in self.client.get("/api/companies/").json()["companies"]],
+            [self.company.id, self.other_company.id],
+        )
+        response = self.send(
+            "post",
+            "/api/calls/",
+            {"contact_id": self.other_contact.id, "status": "completed", "rating": 5},
+        )
+        self.assertEqual(response.status_code, 201)
+        call_id = response.json()["id"]
+        self.assertEqual(self.client.get(f"/api/calls/{call_id}/").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/api/calls/{self.other_call.id}/").status_code, 404
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/inbox/",
+                {"contact_id": self.other_contact.id, "subject": "Allowed"},
+            ).status_code,
+            201,
+        )
+        kpis = self.client.get("/api/kpis/").json()
+        self.assertEqual(kpis["total_calls"], 2)
+        self.assertEqual(
+            [row["id"] for row in kpis["by_contact"]],
+            [self.contact.id, self.other_contact.id],
+        )
+
+    def test_removed_company_link_hides_activity_and_blocks_mutations(self):
+        self.agent.companies.add(self.other_company)
+        hidden_call = Call.objects.create(
+            agent=self.agent, contact=self.other_contact, status="completed", rating=5
+        )
+        hidden_appointment = Appointment.objects.create(
+            call=hidden_call, starts_at=self.start, ends_at=self.start + timedelta(hours=1)
+        )
+        hidden_email = Email.objects.create(
+            agent=self.agent, contact=self.other_contact, subject="Hidden"
+        )
+        self.agent.companies.remove(self.other_company)
+
+        for endpoint, key, expected_id in (
+            ("calls", "calls", self.call.id),
+            ("appointments", "appointments", self.appointment.id),
+            ("inbox", "emails", self.email.id),
+        ):
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(
+                    [item["id"] for item in self.client.get(f"/api/{endpoint}/").json()[key]],
+                    [expected_id],
+                )
+        kpis = self.client.get("/api/kpis/").json()
+        self.assertEqual(kpis["total_calls"], 1)
+        self.assertEqual(kpis["completed_calls"], 0)
+        self.assertIsNone(kpis["average_rating"])
+        self.assertEqual([row["id"] for row in kpis["by_contact"]], [self.contact.id])
+        self.assertEqual([row["id"] for row in kpis["by_company"]], [self.company.id])
+        for path, changes in (
+            (f"/api/calls/{hidden_call.id}/", {"summary": "No"}),
+            (f"/api/appointments/{hidden_appointment.id}/", {"notes": "No"}),
+        ):
+            self.assertEqual(self.client.get(path).status_code, 404)
+            self.assertEqual(self.send("patch", path, changes).status_code, 404)
+        self.assertEqual(
+            self.send(
+                "patch", f"/api/inbox/{hidden_email.id}/", {"is_read": True}
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/appointments/",
+                {
+                    "call_id": hidden_call.id,
+                    "starts_at": self.start.isoformat(),
+                    "ends_at": (self.start + timedelta(hours=1)).isoformat(),
+                },
+            ).status_code,
+            404,
+        )
+        hidden_call.refresh_from_db()
+        hidden_appointment.refresh_from_db()
+        hidden_email.refresh_from_db()
+        self.assertEqual(hidden_call.summary, "")
+        self.assertEqual(hidden_appointment.notes, "")
+        self.assertFalse(hidden_email.is_read)
+
+    def test_agent_without_company_links_has_empty_workspace(self):
+        self.agent.companies.clear()
+        for endpoint, key in (
+            ("companies", "companies"),
+            ("contacts", "contacts"),
+            ("calls", "calls"),
+            ("appointments", "appointments"),
+            ("inbox", "emails"),
+        ):
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(self.client.get(f"/api/{endpoint}/").json()[key], [])
+        kpis = self.client.get("/api/kpis/").json()
+        self.assertEqual(kpis["total_calls"], 0)
+        self.assertEqual(kpis["completed_calls"], 0)
+        self.assertIsNone(kpis["average_rating"])
+        self.assertEqual(kpis["missed_percentage"], 0)
+        self.assertEqual(kpis["rescheduled_percentage"], 0)
+        self.assertEqual(kpis["by_contact"], [])
+        self.assertEqual(kpis["by_company"], [])
+        self.assertEqual(
+            self.send("post", "/api/calls/", {"contact_id": self.contact.id}).status_code,
+            404,
         )
 
     def test_call_creation_and_patch(self):
@@ -575,6 +742,7 @@ class APITests(TestCase):
             self.assertEqual(self.send("post", "/api/calls/", data).status_code, 400)
 
     def test_kpis_completed_only_and_non_scheduled_denominator(self):
+        self.agent.companies.add(self.other_company)
         for status, rating in (
             ("completed", 5),
             ("completed", 3),
