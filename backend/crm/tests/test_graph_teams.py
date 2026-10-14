@@ -34,7 +34,7 @@ class TeamsGraphFrontendTests(SimpleTestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
-        source = Path(__file__).resolve().parent.parent.parent / "frontend/src/teams.ts"
+        source = Path(__file__).resolve().parent.parent.parent.parent / "frontend/src/teams.ts"
         compiler = source.parents[1] / "node_modules/typescript/lib/typescript.js"
         if not compiler.is_file():
             self.skipTest("npm ci is required for frontend validation.")
@@ -104,7 +104,7 @@ assert.match(failure, /selection changed/)
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
-        source = Path(__file__).resolve().parent.parent.parent / "frontend/src"
+        source = Path(__file__).resolve().parent.parent.parent.parent / "frontend/src"
         compiler = source.parent / "node_modules/typescript/lib/typescript.js"
         if not compiler.is_file():
             self.skipTest("npm ci is required for frontend validation.")
@@ -171,7 +171,7 @@ for (const {{ options }} of requests) {{
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
-        source = Path(__file__).resolve().parent.parent.parent / "frontend/src"
+        source = Path(__file__).resolve().parent.parent.parent.parent / "frontend/src"
         compiler = source.parent / "node_modules/typescript/lib/typescript.js"
         if not compiler.is_file():
             self.skipTest("npm ci is required for frontend validation.")

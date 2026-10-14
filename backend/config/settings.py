@@ -7,7 +7,7 @@ from uuid import UUID
 
 from django.core.exceptions import ImproperlyConfigured
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 GRAPH_SCOPES = [
     "openid", "profile", "email", "offline_access",
     "https://graph.microsoft.com/User.Read",
@@ -223,7 +223,7 @@ AUTHENTICATION_BACKENDS = [
 ROOT_URLCONF = "config.urls"
 TEMPLATES = [{
     "BACKEND": "django.template.backends.django.DjangoTemplates",
-    "DIRS": [BASE_DIR / "templates"],
+    "DIRS": [BASE_DIR / "backend" / "templates"],
     "APP_DIRS": True,
     "OPTIONS": {
         "context_processors": [

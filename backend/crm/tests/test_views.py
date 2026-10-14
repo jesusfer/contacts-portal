@@ -603,10 +603,10 @@ class OIDCPageStylingTests(TestCase):
 
 class OIDCSettingsTests(TestCase):
     def test_authentication_templates_are_packaged_and_trigger_image_builds(self):
-        root = Path(__file__).resolve().parent.parent.parent
-        self.assertIn("COPY templates/ templates/", (root / "Dockerfile").read_text())
+        root = Path(__file__).resolve().parent.parent.parent.parent
+        self.assertIn("COPY backend/ backend/", (root / "Dockerfile").read_text())
         workflow = (root / ".github" / "workflows" / "build-image.yml").read_text()
-        self.assertIn('- "templates/**"', workflow)
+        self.assertIn('- "backend/**"', workflow)
 
     def test_oidc_login_confirmation_uses_styled_layout(self):
         providers = self.providers()
