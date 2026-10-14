@@ -289,9 +289,9 @@ recipients. Cards are snapshots and do not update after portal edits.
 The manifest also defines the **Log call summary** action command (`logCallSummary`),
 available from a message's **More actions** menu, the compose box, or the command box.
 A dialog asks the user to pick a customer, a contact, and one of their own calls with
-dropdowns, then to complete the call summary. When invoked from a message, the message
-text is prefilled as the summary (up to 4000 characters). Saving sets the selected call's
-summary, or appends the entered text below the call's existing summary. Dropdowns show at
+dropdowns, then to edit the selected call's current summary. When invoked from a message,
+the message text is added below the existing summary in the editable field. Saving
+replaces the call's summary with the edited text (up to 4000 characters). Dropdowns show at
 most 100 entries; only companies linked to the agent, their contacts, and the agent's
 own calls are offered. Company membership is checked again on each submitted step.
 Test the deployed bot in Teams by searching a customer (including one with no
