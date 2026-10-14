@@ -13,7 +13,9 @@ def profile_picture_path(instance, filename):
 
 
 class UserProfile(models.Model):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile"
+    )
     picture = models.FileField(upload_to=profile_picture_path, blank=True)
 
 
@@ -40,7 +42,9 @@ class Company(ValidatedModel):
 class Contact(ValidatedModel):
     name = models.CharField(max_length=200)
     email = models.EmailField()
-    company = models.ForeignKey(Company, on_delete=models.PROTECT, related_name="contacts")
+    company = models.ForeignKey(
+        Company, on_delete=models.PROTECT, related_name="contacts"
+    )
 
     class Meta:
         ordering = ["name", "id"]
@@ -48,12 +52,16 @@ class Contact(ValidatedModel):
     def __str__(self):
         return self.name
 
+
 class Agent(ValidatedModel):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agent")
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="agent"
+    )
     companies = models.ManyToManyField(Company, related_name="agents")
 
     def __str__(self):
         return self.user.get_username()
+
 
 class Call(ValidatedModel):
     class Status(models.TextChoices):
@@ -76,11 +84,20 @@ class Call(ValidatedModel):
         ordering = ["-id"]
         constraints = [
             models.CheckConstraint(
-                condition=Q(rating__isnull=True) | Q(status="completed", rating__gte=1, rating__lte=5),
+                condition=Q(rating__isnull=True)
+                | Q(status="completed", rating__gte=1, rating__lte=5),
                 name="call_rating_completed_1_to_5",
             ),
             models.CheckConstraint(
-                condition=Q(status__in=["scheduled", "completed", "missed", "rescheduled", "cancelled"]),
+                condition=Q(
+                    status__in=[
+                        "scheduled",
+                        "completed",
+                        "missed",
+                        "rescheduled",
+                        "cancelled",
+                    ]
+                ),
                 name="call_valid_status",
             ),
         ]
@@ -92,7 +109,8 @@ class Call(ValidatedModel):
 
     def save(self, *args, **kwargs):
         if self.status == self.Status.RESCHEDULED or (
-            self.pk and type(self).objects.filter(pk=self.pk, was_rescheduled=True).exists()
+            self.pk
+            and type(self).objects.filter(pk=self.pk, was_rescheduled=True).exists()
         ):
             self.was_rescheduled = True
         if kwargs.get("update_fields") is not None:
@@ -104,7 +122,9 @@ class Call(ValidatedModel):
 
 
 class Appointment(ValidatedModel):
-    call = models.OneToOneField(Call, on_delete=models.CASCADE, related_name="appointment")
+    call = models.OneToOneField(
+        Call, on_delete=models.CASCADE, related_name="appointment"
+    )
     starts_at = models.DateTimeField()
     ends_at = models.DateTimeField()
     notes = models.TextField(blank=True)
@@ -112,7 +132,10 @@ class Appointment(ValidatedModel):
     class Meta:
         ordering = ["starts_at", "id"]
         constraints = [
-            models.CheckConstraint(condition=Q(ends_at__gt=F("starts_at")), name="appointment_end_after_start")
+            models.CheckConstraint(
+                condition=Q(ends_at__gt=F("starts_at")),
+                name="appointment_end_after_start",
+            )
         ]
 
     def clean(self):
@@ -125,7 +148,9 @@ class Appointment(ValidatedModel):
 
         with transaction.atomic():
             self.full_clean()
-            previous = type(self).objects.filter(pk=self.pk).first() if self.pk else None
+            previous = (
+                type(self).objects.filter(pk=self.pk).first() if self.pk else None
+            )
             changed = previous and (
                 previous.starts_at != self.starts_at or previous.ends_at != self.ends_at
             )
@@ -144,7 +169,9 @@ class Appointment(ValidatedModel):
 
 class Email(ValidatedModel):
     agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name="emails")
-    contact = models.ForeignKey(Contact, on_delete=models.PROTECT, related_name="emails")
+    contact = models.ForeignKey(
+        Contact, on_delete=models.PROTECT, related_name="emails"
+    )
     subject = models.CharField(max_length=300)
     body = models.TextField(blank=True)
     received_at = models.DateTimeField(default=timezone.now)

@@ -41,7 +41,9 @@ def render(data, values):
     if isinstance(data, list):
         return [render(item, values) for item in data]
     if isinstance(data, dict):
-        return {render(key, values): render(value, values) for key, value in data.items()}
+        return {
+            render(key, values): render(value, values) for key, value in data.items()
+        }
     return data
 
 
@@ -57,12 +59,18 @@ def package_manifests(teams_dir):
         for source in sorted(manifest.parent.rglob("*")):
             if not source.is_file() or source.suffix not in {".json", ".png"}:
                 continue
-            name = "manifest.json" if source == manifest else source.relative_to(manifest.parent).as_posix()
+            name = (
+                "manifest.json"
+                if source == manifest
+                else source.relative_to(manifest.parent).as_posix()
+            )
             if name in entries:
                 raise ValueError(f"Duplicate package entry: {name}")
             if source.suffix == ".json":
                 data = json.loads(source.read_text(encoding="utf-8"))
-                entries[name] = (json.dumps(render(data, values), indent=2) + "\n").encode("utf-8")
+                entries[name] = (
+                    json.dumps(render(data, values), indent=2) + "\n"
+                ).encode("utf-8")
             else:
                 entries[name] = source.read_bytes()
         packages.append((teams_dir / "dist" / f"{manifest.parent.name}.zip", entries))

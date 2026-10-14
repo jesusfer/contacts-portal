@@ -34,17 +34,22 @@ class PackagingTests(unittest.TestCase):
         manifest = self.teams_dir / "api-extension" / "api-manifest.json"
         original = manifest.read_bytes()
         packages = package_manifests(self.teams_dir)
-        self.assertEqual({path.name for path in packages}, {
-            "api-extension.zip", "tabs-bot-extension.zip",
-        })
+        self.assertEqual(
+            {path.name for path in packages},
+            {
+                "api-extension.zip",
+                "tabs-bot-extension.zip",
+            },
+        )
         for package in packages:
             with ZipFile(package) as archive:
                 self.assertIn("manifest.json", archive.namelist())
                 self.assertNotIn("api-manifest.json", archive.namelist())
                 for name in ("color.png", "outline.png"):
-                    self.assertEqual(archive.read(name), (
-                        self.teams_dir / package.stem / name
-                    ).read_bytes())
+                    self.assertEqual(
+                        archive.read(name),
+                        (self.teams_dir / package.stem / name).read_bytes(),
+                    )
                 for name in archive.namelist():
                     if name.endswith(".json"):
                         content = archive.read(name).decode("utf-8")
@@ -54,12 +59,20 @@ class PackagingTests(unittest.TestCase):
                 self.assertEqual(data["validDomains"], ["portal.example.com"])
                 if package.stem == "api-extension":
                     self.assertEqual(data["id"], self.values["TEAMS_API_APP_ID"])
-                    specification = json.loads(archive.read("contact-search-openapi.json"))
-                    self.assertEqual(specification["servers"][0]["url"], "https://portal.example.com")
-                    self.assertIn("${name}", archive.read("contact-card-template.json").decode())
+                    specification = json.loads(
+                        archive.read("contact-search-openapi.json")
+                    )
+                    self.assertEqual(
+                        specification["servers"][0]["url"], "https://portal.example.com"
+                    )
+                    self.assertIn(
+                        "${name}", archive.read("contact-card-template.json").decode()
+                    )
                 else:
                     self.assertEqual(data["id"], self.values["TEAMS_APP_ID"])
-                    self.assertIn("?provider=entraid-work", data["staticTabs"][0]["contentUrl"])
+                    self.assertIn(
+                        "?provider=entraid-work", data["staticTabs"][0]["contentUrl"]
+                    )
         self.assertEqual(manifest.read_bytes(), original)
 
     def test_missing_or_blank_values_do_not_write_archives(self):
@@ -88,10 +101,13 @@ class PackagingTests(unittest.TestCase):
             'TEAMS_OIDC_PROVIDER_ID="value=with#symbols"\n',
             encoding="utf-8",
         )
-        self.assertEqual(read_env(self.env), {
-            "PORTAL_HOST": "portal.example.com",
-            "TEAMS_OIDC_PROVIDER_ID": "value=with#symbols",
-        })
+        self.assertEqual(
+            read_env(self.env),
+            {
+                "PORTAL_HOST": "portal.example.com",
+                "TEAMS_OIDC_PROVIDER_ID": "value=with#symbols",
+            },
+        )
 
     def test_malformed_env(self):
         for line in ("invalid", "invalid=value", 'KEY="unclosed'):
@@ -103,17 +119,25 @@ class PackagingTests(unittest.TestCase):
     def test_json_values_are_safely_escaped(self):
         value = 'quoted "value" with \\ and \n'
         rendered = render({"value": "<VALUE>", "number": 1}, {"VALUE": value})
-        self.assertEqual(json.loads(json.dumps(rendered)), {"value": value, "number": 1})
+        self.assertEqual(
+            json.loads(json.dumps(rendered)), {"value": value, "number": 1}
+        )
 
     def test_rerun_replaces_archives(self):
         package_manifests(self.teams_dir)
-        self.env.write_text(self.env.read_text().replace(
-            "portal.example.com", "new.example.com",
-        ), encoding="utf-8")
+        self.env.write_text(
+            self.env.read_text().replace(
+                "portal.example.com",
+                "new.example.com",
+            ),
+            encoding="utf-8",
+        )
         for package in package_manifests(self.teams_dir):
             with ZipFile(package) as archive:
-                self.assertEqual(json.loads(archive.read("manifest.json"))["validDomains"],
-                                 ["new.example.com"])
+                self.assertEqual(
+                    json.loads(archive.read("manifest.json"))["validDomains"],
+                    ["new.example.com"],
+                )
 
     def test_example_covers_all_placeholders(self):
         source = Path(__file__).resolve().parent
@@ -128,7 +152,8 @@ class PackagingTests(unittest.TestCase):
         packages = package_manifests(self.teams_dir)
         originals = {path: path.read_bytes() for path in packages}
         (self.teams_dir / "tabs-bot-extension" / "manifest.json").write_text(
-            "{invalid", encoding="utf-8",
+            "{invalid",
+            encoding="utf-8",
         )
         with self.assertRaises(json.JSONDecodeError):
             package_manifests(self.teams_dir)

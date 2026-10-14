@@ -4,19 +4,18 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('crm', '0006_alter_agent_companies_alter_agent_company'),
+        ("crm", "0006_alter_agent_companies_alter_agent_company"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='agent',
-            name='company',
+            model_name="agent",
+            name="company",
         ),
         migrations.AlterField(
-            model_name='agent',
-            name='companies',
-            field=models.ManyToManyField(related_name='agents', to='crm.company'),
+            model_name="agent",
+            name="companies",
+            field=models.ManyToManyField(related_name="agents", to="crm.company"),
         ),
     ]

@@ -1,4 +1,5 @@
 """Text formatting shared by Teams messaging-extension features."""
+
 import re
 
 

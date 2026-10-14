@@ -17,10 +17,19 @@ def normalize_picture(upload):
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(upload) as image:
-                if image.format not in PICTURE_TYPES or upload.content_type != PICTURE_TYPES[image.format]:
-                    raise ValidationError({"picture": "Upload a JPEG, PNG, or WebP image with its matching content type."})
+                if (
+                    image.format not in PICTURE_TYPES
+                    or upload.content_type != PICTURE_TYPES[image.format]
+                ):
+                    raise ValidationError(
+                        {
+                            "picture": "Upload a JPEG, PNG, or WebP image with its matching content type."
+                        }
+                    )
                 if max(image.size) > 4096:
-                    raise ValidationError({"picture": "Picture dimensions must not exceed 4096 pixels."})
+                    raise ValidationError(
+                        {"picture": "Picture dimensions must not exceed 4096 pixels."}
+                    )
                 image.verify()
             upload.seek(0)
             with Image.open(upload) as image:
@@ -33,6 +42,12 @@ def normalize_picture(upload):
                 output = BytesIO()
                 normalized.save(output, format="JPEG", quality=85)
         return ContentFile(output.getvalue())
-    except (UnidentifiedImageError, OSError, ValueError, SyntaxError,
-            Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+    except (
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+        SyntaxError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ) as exc:
         raise ValidationError({"picture": "Invalid or unsafe image."}) from exc

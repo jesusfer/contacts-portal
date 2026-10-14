@@ -1,4 +1,5 @@
 """Metadata-only tracing for outbound identity and Graph requests."""
+
 import logging
 from functools import partial
 from time import monotonic
@@ -37,14 +38,18 @@ def logged_request(send, url, *, service, operation, method, **kwargs):
     except requests.RequestException as exc:
         logger.warning(
             "external_call.failed %s duration_ms=%.1f error_type=%s",
-            context, (monotonic() - started) * 1000, type(exc).__name__,
+            context,
+            (monotonic() - started) * 1000,
+            type(exc).__name__,
         )
         raise
     log = logger.info if 200 <= response.status_code < 300 else logger.warning
     log(
         "external_call.complete %s status=%s duration_ms=%.1f "
         "request_id=%s correlation_id=%s",
-        context, response.status_code, (monotonic() - started) * 1000,
+        context,
+        response.status_code,
+        (monotonic() - started) * 1000,
         _response_id(response, "request-id", "x-ms-request-id"),
         _response_id(response, "client-request-id", "x-ms-correlation-id"),
     )
@@ -64,6 +69,10 @@ def oidc_request(send, method, url, **kwargs):
     else:
         operation = "http_request"
     return logged_request(
-        partial(send, method), url, service="oidc", operation=operation,
-        method=method, **kwargs,
+        partial(send, method),
+        url,
+        service="oidc",
+        operation=operation,
+        method=method,
+        **kwargs,
     )

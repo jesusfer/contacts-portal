@@ -18,8 +18,10 @@ class TeamsFrameMiddleware:
             response.headers.pop("X-Frame-Options", None)
             policy = response.get("Content-Security-Policy", "")
             directives = [
-                item.strip() for item in policy.split(";")
-                if item.strip() and not item.strip().lower().startswith("frame-ancestors")
+                item.strip()
+                for item in policy.split(";")
+                if item.strip()
+                and not item.strip().lower().startswith("frame-ancestors")
             ]
             directives.append(
                 "frame-ancestors 'self' https://teams.microsoft.com "
@@ -31,7 +33,9 @@ class TeamsFrameMiddleware:
 
 
 class ProfileUploadHandler(MemoryFileUploadHandler):
-    def handle_raw_input(self, input_data, META, content_length, boundary, encoding=None):
+    def handle_raw_input(
+        self, input_data, META, content_length, boundary, encoding=None
+    ):
         if content_length and content_length > 6 * 1024 * 1024:
             raise RequestDataTooBig("Picture upload is too large.")
         self.activated = True
@@ -50,7 +54,9 @@ class ProfileCsrfViewMiddleware(CsrfViewMiddleware):
         if is_profile and request.method == "POST":
             request.upload_handlers = [ProfileUploadHandler(request)]
         try:
-            return super().process_view(request, callback, callback_args, callback_kwargs)
+            return super().process_view(
+                request, callback, callback_args, callback_kwargs
+            )
         except (SuspiciousOperation, MultiPartParserError):
             if not is_profile:
                 raise

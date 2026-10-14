@@ -1,4 +1,5 @@
 """Tenant-bound Teams authentication and server-side Graph credentials."""
+
 import json
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
@@ -29,10 +30,17 @@ class TeamsTokenError(ValueError):
 
 def graph_provider(provider_id):
     """Return the configured Entra ID OIDC app matching ``provider_id``, if any."""
-    return next((
-        app for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
-        if app["provider_id"] == provider_id and app["provider_id"].lower().startswith("entraid")
-    ), None)
+    return next(
+        (
+            app
+            for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get(
+                "APPS", []
+            )
+            if app["provider_id"] == provider_id
+            and app["provider_id"].lower().startswith("entraid")
+        ),
+        None,
+    )
 
 
 def extract_tenant_from_url(server_url):
@@ -40,8 +48,10 @@ def extract_tenant_from_url(server_url):
     try:
         url = urlsplit(server_url)
         parts = url.path.rstrip("/").split("/")
-        if url.scheme == "https" and url.netloc == "login.microsoftonline.com" and (
-            len(parts) == 2 or (len(parts) == 3 and parts[2] == "v2.0")
+        if (
+            url.scheme == "https"
+            and url.netloc == "login.microsoftonline.com"
+            and (len(parts) == 2 or (len(parts) == 3 and parts[2] == "v2.0"))
         ):
             if parts[1] == "organizations":
                 return "organizations"
@@ -58,13 +68,18 @@ def provider_tenant(app, tenant_id=None):
     issuers only accept that same tenant ID when one is supplied.
     """
     issuer_tenant = extract_tenant_from_url(app["settings"].get("server_url", ""))
-    if not issuer_tenant or app["settings"].get("graph_tenant_id", issuer_tenant) != issuer_tenant:
+    if (
+        not issuer_tenant
+        or app["settings"].get("graph_tenant_id", issuer_tenant) != issuer_tenant
+    ):
         raise TeamsConfigError("Invalid Graph tenant configuration.")
     if issuer_tenant == "organizations":
         try:
             return str(UUID(tenant_id))
         except (ValueError, TypeError, AttributeError) as exc:
-            raise TeamsConfigError("A verified tenant ID is required for this provider.") from exc
+            raise TeamsConfigError(
+                "A verified tenant ID is required for this provider."
+            ) from exc
     if tenant_id is not None:
         try:
             tenant_id = str(UUID(tenant_id))
@@ -84,9 +99,14 @@ def load_teams_config(provider_settings):
     """
     config = provider_settings.get("teams")
     tenant = extract_tenant_from_url(provider_settings.get("server_url", ""))
-    if not isinstance(config, dict) or not all(
-        config.get(key) for key in ("tenant_id", "audience", "resource", "authorized_client_ids")
-    ) or config["tenant_id"] != tenant:
+    if (
+        not isinstance(config, dict)
+        or not all(
+            config.get(key)
+            for key in ("tenant_id", "audience", "resource", "authorized_client_ids")
+        )
+        or config["tenant_id"] != tenant
+    ):
         raise TeamsConfigError("Invalid Teams configuration.")
     return config
 
@@ -100,8 +120,11 @@ def _get_jwks(tenant_id, *, reload=False):
             response = logged_request(
                 requests.get,
                 f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys",
-                service="entraid", operation="signing_keys", method="GET",
-                timeout=10, allow_redirects=False,
+                service="entraid",
+                operation="signing_keys",
+                method="GET",
+                timeout=10,
+                allow_redirects=False,
             )
             if response.status_code != 200:
                 raise TeamsTokenError("Teams signing keys unavailable.")
@@ -126,9 +149,15 @@ def validate_teams_token(token, config):
     required = ["exp", "nbf", "iat", "iss", "aud", "tid", "oid", "sub", "scp", "azp"]
     try:
         header = jwt.get_unverified_header(token)
-        if header.get("alg") != "RS256" or not isinstance(header.get("kid"), str) or not header["kid"]:
+        if (
+            header.get("alg") != "RS256"
+            or not isinstance(header.get("kid"), str)
+            or not header["kid"]
+        ):
             raise TeamsTokenError("Invalid Teams signing algorithm or key.")
-        unverified = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+        unverified = jwt.decode(
+            token, options={"verify_signature": False, "verify_exp": False}
+        )
         tenant_id = unverified.get("tid")
         if not isinstance(tenant_id, str):
             raise TeamsTokenError("Invalid Teams tenant.")
@@ -146,15 +175,22 @@ def validate_teams_token(token, config):
         if key is None:
             raise TeamsTokenError("Unknown Teams signing key.")
         claims = jwt.decode(
-            token, key, algorithms=["RS256"], audience=config["audience"],
+            token,
+            key,
+            algorithms=["RS256"],
+            audience=config["audience"],
             issuer=f"https://login.microsoftonline.com/{tenant_id}/v2.0",
             options={"require": required},
         )
         if any(type(claims[key]) not in (int, float) for key in ("exp", "nbf", "iat")):
             raise TeamsTokenError("Invalid Teams token timestamps.")
         if (
-            claims["tid"] != tenant_id or claims["aud"] != config["audience"]
-            or any(not isinstance(claims[key], str) or not claims[key] for key in ("oid", "sub", "azp"))
+            claims["tid"] != tenant_id
+            or claims["aud"] != config["audience"]
+            or any(
+                not isinstance(claims[key], str) or not claims[key]
+                for key in ("oid", "sub", "azp")
+            )
             or claims["azp"] not in config["authorized_client_ids"]
             or not isinstance(claims["scp"], str)
             or "access_as_user" not in claims["scp"].split()
@@ -180,11 +216,16 @@ def get_teams_account(provider_id, claims):
         TeamsTokenError: If no unique active account is linked to the identity.
     """
     matches = [
-        account for account in SocialAccount.objects.filter(provider=provider_id).select_related("user")
+        account
+        for account in SocialAccount.objects.filter(
+            provider=provider_id
+        ).select_related("user")
         if account_identity(account.extra_data) == (claims["oid"], claims["tid"])
     ]
     if len(matches) != 1 or not matches[0].user.is_active:
-        raise TeamsTokenError("Teams identity is not linked to an active account. Sign in via OIDC first.")
+        raise TeamsTokenError(
+            "Teams identity is not linked to an active account. Sign in via OIDC first."
+        )
     return matches[0]
 
 
@@ -201,14 +242,18 @@ def exchange_graph_token(app, *, assertion=None, refresh_token=None, tenant_id=N
     """
     tenant = provider_tenant(app, tenant_id)
     data = {
-        "client_id": app["client_id"], "client_secret": app["secret"],
+        "client_id": app["client_id"],
+        "client_secret": app["secret"],
         "scope": "https://graph.microsoft.com/.default offline_access",
     }
     if assertion is not None:
-        data.update({
-            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-            "requested_token_use": "on_behalf_of", "assertion": assertion,
-        })
+        data.update(
+            {
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "requested_token_use": "on_behalf_of",
+                "assertion": assertion,
+            }
+        )
     else:
         data.update({"grant_type": "refresh_token", "refresh_token": refresh_token})
     try:
@@ -218,7 +263,9 @@ def exchange_graph_token(app, *, assertion=None, refresh_token=None, tenant_id=N
             service="entraid",
             operation="on_behalf_of" if assertion is not None else "refresh_token",
             method="POST",
-            data=data, timeout=10, allow_redirects=False,
+            data=data,
+            timeout=10,
+            allow_redirects=False,
         )
         if response.status_code in (400, 401, 403):
             raise TokenExpiredError("Graph authorization required. Sign in again.")
@@ -226,11 +273,16 @@ def exchange_graph_token(app, *, assertion=None, refresh_token=None, tenant_id=N
             raise GraphClientError("Graph token service unavailable.")
         token = response.json()
         if (
-            not isinstance(token, dict) or not isinstance(token.get("access_token"), str)
-            or not token["access_token"] or not isinstance(token.get("token_type"), str)
+            not isinstance(token, dict)
+            or not isinstance(token.get("access_token"), str)
+            or not token["access_token"]
+            or not isinstance(token.get("token_type"), str)
             or token["token_type"].lower() != "bearer"
-            or type(token.get("expires_in")) is not int or not 0 < token["expires_in"] <= 86400
-            or ("refresh_token" in token and not isinstance(token["refresh_token"], str))
+            or type(token.get("expires_in")) is not int
+            or not 0 < token["expires_in"] <= 86400
+            or (
+                "refresh_token" in token and not isinstance(token["refresh_token"], str)
+            )
         ):
             raise GraphClientError("Invalid Graph token response.")
     except (requests.RequestException, ValueError) as exc:
@@ -244,14 +296,29 @@ class GraphTokenManager:
     SESSION_KEY = "graph_tokens"
 
     @classmethod
-    def store_token(cls, request, provider_id, access_token, refresh_token=None, expires_in=3600,
-                    tenant_id=None, *, expires_at=None, oid=None):
+    def store_token(
+        cls,
+        request,
+        provider_id,
+        access_token,
+        refresh_token=None,
+        expires_in=3600,
+        tenant_id=None,
+        *,
+        expires_at=None,
+        oid=None,
+    ):
         """Save one provider's token data and mark Graph access as enabled."""
         expiry = expires_at or timezone.now() + timedelta(seconds=expires_in)
-        request.session[cls.SESSION_KEY] = {provider_id: {
-            "access_token": access_token, "refresh_token": refresh_token or "",
-            "expires_at": expiry.isoformat(), "tenant_id": tenant_id, "oid": oid,
-        }}
+        request.session[cls.SESSION_KEY] = {
+            provider_id: {
+                "access_token": access_token,
+                "refresh_token": refresh_token or "",
+                "expires_at": expiry.isoformat(),
+                "tenant_id": tenant_id,
+                "oid": oid,
+            }
+        }
         request.session["graph_enabled"] = True
 
     @classmethod
@@ -270,7 +337,10 @@ class GraphTokenManager:
             expiry = datetime.fromisoformat(token["expires_at"])
             if timezone.is_naive(expiry) or token.get("tenant_id") != tenant:
                 raise ValueError
-            if not isinstance(token.get("access_token"), str) or not token["access_token"]:
+            if (
+                not isinstance(token.get("access_token"), str)
+                or not token["access_token"]
+            ):
                 raise ValueError
         except (KeyError, TypeError, ValueError) as exc:
             cls.clear_token(request)
@@ -281,7 +351,9 @@ class GraphTokenManager:
             raise TokenExpiredError("Graph authorization expired. Sign in again.")
         try:
             refreshed = exchange_graph_token(
-                app, refresh_token=token["refresh_token"], tenant_id=tenant,
+                app,
+                refresh_token=token["refresh_token"],
+                tenant_id=tenant,
             )
             if token.get("oid"):
                 profile = GraphClient(refreshed["access_token"], tenant).get_profile()
@@ -291,9 +363,13 @@ class GraphTokenManager:
             cls.clear_token(request)
             raise
         cls.store_token(
-            request, provider_id, refreshed["access_token"],
-            refreshed.get("refresh_token") or token["refresh_token"], refreshed["expires_in"],
-            tenant, oid=token.get("oid"),
+            request,
+            provider_id,
+            refreshed["access_token"],
+            refreshed.get("refresh_token") or token["refresh_token"],
+            refreshed["expires_in"],
+            tenant,
+            oid=token.get("oid"),
         )
         return refreshed["access_token"]
 
@@ -305,5 +381,11 @@ class GraphTokenManager:
         is accepted for callers that identify the provider being cleared.
         """
         request.session.pop(cls.SESSION_KEY, None)
-        for key in ("graph_enabled", "crm_teams_authenticated", "graph_profile", "graph_error", "graph_names_from"):
+        for key in (
+            "graph_enabled",
+            "crm_teams_authenticated",
+            "graph_profile",
+            "graph_error",
+            "graph_names_from",
+        ):
             request.session.pop(key, None)
