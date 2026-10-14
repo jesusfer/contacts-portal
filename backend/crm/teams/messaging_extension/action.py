@@ -5,7 +5,7 @@ import re
 from botbuilder.schema import InvokeResponse
 from django.utils.html import strip_tags
 
-from ...models import Agent, Call, Company, Contact
+from ...models import Call, Company, Contact
 
 
 ACTION_COMMAND_ID = "logCallSummary"
