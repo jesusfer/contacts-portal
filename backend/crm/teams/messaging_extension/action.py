@@ -30,7 +30,7 @@ def task_response(card=None, title="Log call summary", message=None):
         task = {"type": "message", "value": message}
     else:
         task = {"type": "continue", "value": {
-            "title": title, "width": "medium", "height": "auto",
+            "title": title, "width": "medium", "height": "medium",
             "card": {"contentType": "application/vnd.microsoft.card.adaptive", "content": card},
         }}
     return InvokeResponse(status=200, body={"task": task})
