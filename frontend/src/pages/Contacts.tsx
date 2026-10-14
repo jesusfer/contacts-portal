@@ -20,7 +20,7 @@ export function Contacts({ version, openCreate }) {
       <PageHeading
         eyebrow="Contacts"
         title="People, not just records."
-        subtitle="A shared directory of people and the companies they belong to."
+        subtitle="People at the companies linked to your agent account."
       >
         <div class="actions">
           <button class="button secondary" onClick={() => openCreate('company')}>

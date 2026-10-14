@@ -8,7 +8,6 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from ..graph import GraphClient
-from ..models import Company
 from ..signals import AUTH_SOURCE_SESSION_KEY
 from .auth import (
     GraphTokenManager,
@@ -92,7 +91,7 @@ def teams_customers(request):
     if not teams_crm_authorized(request):
         return error("Sign in to the CRM with Teams SSO first.", 403)
     return JsonResponse(
-        {"customers": [company_json(item) for item in Company.objects.all()]}
+        {"customers": [company_json(item) for item in request.agent.companies.all()]}
     )
 
 
@@ -101,13 +100,13 @@ def teams_customer(request, pk):
     """Return one customer's details and agent-scoped calls for an authorized Teams tab."""
     if not teams_crm_authorized(request):
         return error("Sign in to the CRM with Teams SSO first.", 403)
-    company = get_object_or_404(Company, pk=pk)
+    company = get_object_or_404(request.agent.companies.all(), pk=pk)
     return JsonResponse(
         {
             "customer": company_json(company),
             "contacts": [
                 contact_json(item)
-                for item in directory_contacts().filter(company=company)
+                for item in directory_contacts(request).filter(company=company)
             ],
             "calls": [
                 call_json(item)

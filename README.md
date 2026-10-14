@@ -400,10 +400,11 @@ except through a proxy that strips untrusted forwarded headers.
 
 ## Domain and behavior
 
-- Each user has one Agent/company association (their employer). Agents see
-  only their own calls, appointments, and emails. The company/contact
-  directory is shared by provisioned agents; contacts can belong to different
-  companies, allowing an agent to work with multiple customer organizations.
+- Each user has one Agent, which can be linked to multiple companies. In the CRM
+  workspace, agents see and interact only with contacts at their linked companies,
+  and only their own calls, appointments, and emails for those contacts.
+  The overview and KPIs use the same scope. Removing a company link hides its
+  contacts and activity without deleting historical records.
 - Calls have `scheduled`, `completed`, `missed`, `rescheduled`, or `cancelled`
   status. Only completed calls accept contact ratings, on a 1–5 scale.
 - Each appointment is linked to one call, with a start, end, and notes.
@@ -423,5 +424,5 @@ except through a proxy that strips untrusted forwarded headers.
 
 All mutation endpoints require Django's CSRF token and a signed-in session;
 API routes live under `/api/`. User and agent provisioning is deliberately
-restricted to administrators; agents can add companies and contacts to the
-shared directory.
+restricted to administrators; agents can add companies (automatically linked to
+their own Agent) and create contacts only at their linked companies.
