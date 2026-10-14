@@ -1,7 +1,7 @@
 FROM node:22-bookworm-slim AS frontend
 WORKDIR /build/frontend
 COPY frontend/package*.json ./
-RUN npm ci
+RUN HUSKY=0 npm ci
 COPY frontend/ ./
 RUN npm run build
 
