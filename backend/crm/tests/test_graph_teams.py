@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import jwt
+import msal
 from allauth.account.signals import user_logged_in as allauth_user_logged_in
 from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.internal.flows.login import complete_login
@@ -781,7 +782,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def setUp(self):
         cache.clear()
 
-    def graph_login(self, *, expires_in=3600, refresh_token="session-refresh"):
+    def graph_login(self, *, expires_in=3600, refresh_token="session-refresh", oid=OID):
         self.client.force_login(self.user)
         session = self.client.session
         request = SimpleNamespace(session=session)
@@ -792,7 +793,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             refresh_token,
             expires_in,
             TENANT,
-            oid=OID,
+            oid=oid,
         )
         session[AUTH_SOURCE_SESSION_KEY] = "entraid-work"
         session.save()
@@ -1072,33 +1073,52 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         )
         get.assert_not_called()
 
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     @patch("crm.graph.requests.get")
     def test_refresh_rotates_session_credentials_and_checks_identity(self, get, post):
         self.graph_login(expires_in=-1)
         get.return_value = response(PROFILE)
-        post.return_value = response(
-            {
-                "access_token": "renewed-access",
-                "refresh_token": "renewed-refresh",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
-        )
+        renewed = {
+            "access_token": "renewed-access",
+            "refresh_token": "renewed-refresh",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
+
+        def migrate(*args, **kwargs):
+            post.call_args.kwargs["token_cache"].add(
+                {
+                    "client_id": CLIENT,
+                    "token_endpoint": f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token",
+                    "scope": ["https://graph.microsoft.com/.default"],
+                    "response": renewed,
+                }
+            )
+            return {key: value for key, value in renewed.items() if key != "refresh_token"}
+
+        post.return_value.acquire_token_by_refresh_token.side_effect = migrate
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 200)
         tokens = self.client.session["graph_tokens"]["entraid-work"]
         self.assertEqual(tokens["access_token"], "renewed-access")
-        self.assertEqual(tokens["refresh_token"], "renewed-refresh")
+        self.assertEqual(tokens["refresh_token"], "")
+        token_cache = msal.SerializableTokenCache()
+        token_cache.deserialize(tokens["msal_cache"])
         self.assertEqual(
-            post.call_args.args[0],
-            f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token",
+            list(token_cache.search(msal.TokenCache.CredentialType.REFRESH_TOKEN))[0]["secret"],
+            "renewed-refresh",
         )
         self.assertEqual(
-            post.call_args.kwargs["data"]["scope"],
-            "https://graph.microsoft.com/.default offline_access",
+            post.call_args.kwargs["authority"],
+            f"https://login.microsoftonline.com/{TENANT}",
         )
-        self.assertEqual(post.call_args.kwargs["data"]["grant_type"], "refresh_token")
-        self.assertIs(post.call_args.kwargs["allow_redirects"], False)
+        self.assertEqual(
+            post.return_value.acquire_token_by_refresh_token.call_args.kwargs["scopes"],
+            ["https://graph.microsoft.com/.default"],
+        )
+        self.assertEqual(
+            post.return_value.acquire_token_by_refresh_token.call_args.args,
+            ("session-refresh",),
+        )
         self.assertEqual(
             get.call_args.kwargs["headers"]["Authorization"],
             "Bearer " + "renewed-access",
@@ -1106,25 +1126,165 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.client.get("/api/graph/profile/")
         post.assert_called_once()
 
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     @patch("crm.graph.requests.get")
     def test_refresh_preserves_old_refresh_token_when_not_rotated(self, get, post):
         self.graph_login(expires_in=-1)
         get.return_value = response(PROFILE)
-        post.return_value = response(
-            {
-                "access_token": "renewed-access",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
-        )
+        post.return_value.acquire_token_by_refresh_token.return_value = {
+            "access_token": "renewed-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 200)
         self.assertEqual(
             self.client.session["graph_tokens"]["entraid-work"]["refresh_token"],
             "session-refresh",
         )
 
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
+    @patch("crm.graph.requests.get")
+    def test_graph_session_bindings_are_checked_before_using_cached_tokens(self, get, client):
+        get.return_value = response(PROFILE)
+        for field, value in (
+            ("user_id", str(self.first.pk)),
+            ("provider_id", "entraid-other"),
+            ("client_id", "another-client"),
+            ("tenant_id", CLIENT),
+        ):
+            with self.subTest(field=field):
+                self.graph_login()
+                session = self.client.session
+                session["graph_tokens"]["entraid-work"][field] = value
+                session.save()
+                self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
+                self.assertNotIn("graph_tokens", self.client.session)
+        client.assert_not_called()
+        get.assert_not_called()
+
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
+    @patch("crm.graph.requests.get")
+    def test_browser_oidc_sessions_without_linked_oid_remain_usable_and_refreshable(
+        self, get, application
+    ):
+        self.account.extra_data = {"id_token": {"tid": TENANT, "sub": "oidc-sub"}}
+        self.account.save()
+        get.return_value = response(PROFILE)
+        application.return_value.acquire_token_by_refresh_token.return_value = {
+            "access_token": "refreshed-browser-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
+        for expires_in, oid in ((3600, None), (-1, None), (3600, OID), (-1, OID)):
+            with self.subTest(expires_in=expires_in, oid=oid):
+                self.graph_login(expires_in=expires_in, oid=oid)
+                result = self.client.get("/api/graph/profile/")
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.json()["id"], OID)
+                self.assertEqual(
+                    self.client.session["graph_tokens"]["entraid-work"]["oid"], oid
+                )
+        application.return_value.acquire_token_by_refresh_token.assert_called_with(
+            "session-refresh", scopes=["https://graph.microsoft.com/.default"]
+        )
+        self.assertEqual(
+            application.return_value.acquire_token_by_refresh_token.call_count, 2
+        )
+        self.assertEqual(get.call_count, 5)
+
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
+    def test_legacy_sessions_without_bindings_require_clean_reauthentication(
+        self, application
+    ):
+        for field in ("user_id", "provider_id", "client_id"):
+            with self.subTest(field=field):
+                self.graph_login()
+                session = self.client.session
+                del session["graph_tokens"]["entraid-work"][field]
+                session.save()
+                result = self.client.get("/api/graph/profile/")
+                self.assertEqual(result.status_code, 403)
+                self.assertNotIn("graph_tokens", self.client.session)
+                self.assertNotIn("graph_enabled", self.client.session)
+                self.assertNotIn("crm_teams_authenticated", self.client.session)
+        application.assert_not_called()
+
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
+    @patch("crm.graph.requests.get")
+    def test_obo_cache_survives_login_and_refreshes_without_returned_refresh_token(
+        self, get, application, keys
+    ):
+        self.client.force_login(self.first)
+        keys.return_value = self.jwks
+        get.return_value = response(PROFILE)
+        result = {
+            "access_token": "obo-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
+
+        def obo(*args, **kwargs):
+            application.call_args.kwargs["token_cache"].add(
+                {
+                    "client_id": CLIENT,
+                    "token_endpoint": f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token",
+                    "scope": ["https://graph.microsoft.com/.default"],
+                    "response": {**result, "refresh_token": "cached-obo-refresh"},
+                }
+            )
+            return result
+
+        application.return_value.acquire_token_on_behalf_of.side_effect = obo
+        self.assertEqual(self.sso().status_code, 200)
+        session = self.client.session
+        stored = session["graph_tokens"]["entraid-work"]
+        self.assertEqual(stored["user_id"], str(self.user.pk))
+        self.assertEqual(stored["refresh_token"], "")
+        self.assertIn("cached-obo-refresh", stored["msal_cache"])
+        stored["expires_at"] = (timezone.now() - timedelta(seconds=1)).isoformat()
+        session.save()
+        application.return_value.get_accounts.return_value = []
+        application.return_value.acquire_token_by_refresh_token.return_value = {
+            **result,
+            "access_token": "refreshed-obo-access",
+        }
+        self.assertEqual(self.client.get("/api/graph/profile/").status_code, 200)
+        application.return_value.acquire_token_by_refresh_token.assert_called_once_with(
+            "cached-obo-refresh", scopes=["https://graph.microsoft.com/.default"]
+        )
+        self.assertIn(
+            "cached-obo-refresh",
+            self.client.session["graph_tokens"]["entraid-work"]["msal_cache"],
+        )
+        self.assertEqual(
+            get.call_args.kwargs["headers"]["Authorization"],
+            "Bearer " + "refreshed-obo-access",
+        )
+
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
+    def test_bad_serialized_cache_is_cleared_without_acquisition(self, application):
+        self.graph_login(expires_in=-1, refresh_token="")
+        session = self.client.session
+        session["graph_tokens"]["entraid-work"]["msal_cache"] = "not-json"
+        session.save()
+        self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
+        self.assertNotIn("graph_tokens", self.client.session)
+        application.assert_not_called()
+
+    def test_separate_browser_sessions_never_share_user_credentials(self):
+        self.graph_login()
+        original = self.client.session["graph_tokens"]
+        other_client = Client()
+        other_client.force_login(self.user)
+        session = other_client.session
+        session[AUTH_SOURCE_SESSION_KEY] = "entraid-work"
+        session.save()
+        self.assertEqual(other_client.get("/api/graph/profile/").status_code, 403)
+        self.assertNotIn("graph_tokens", other_client.session)
+        self.assertEqual(self.client.session["graph_tokens"], original)
+
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     def test_expired_without_refresh_and_tenant_mismatch_never_exchange(self, post):
         self.graph_login(expires_in=-1, refresh_token="")
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
@@ -1146,47 +1306,45 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             403,
         )
 
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     @patch("crm.graph.requests.get")
     def test_refresh_failure_redirect_or_mismatch_does_not_expose_credentials(
         self, get, post
     ):
-        for status, expected in ((400, 403), (302, 502), (500, 502)):
-            with self.subTest(status=status):
+        for failure, expected in (
+            ("invalid_grant", 403), ("invalid_response", 502), ("server_error", 502)
+        ):
+            with self.subTest(failure=failure):
                 self.graph_login(expires_in=-1)
-                post.return_value = response(
-                    {"error_description": "session-refresh"}, status
-                )
+                post.return_value.acquire_token_by_refresh_token.return_value = {
+                    "error": failure, "error_description": "session-refresh"
+                }
                 result = self.client.get("/api/graph/profile/")
                 self.assertEqual(result.status_code, expected)
                 self.assertNotIn("session-refresh", str(result.json()))
         self.graph_login(expires_in=-1)
-        post.return_value = response(
-            {
-                "access_token": "renewed-access",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
-        )
+        post.return_value.acquire_token_by_refresh_token.return_value = {
+            "access_token": "renewed-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         get.return_value = response({**PROFILE, "id": "another-user"})
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
         self.assertNotIn("graph_tokens", self.client.session)
 
     @patch("crm.teams.auth._get_jwks")
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     @patch("crm.graph.requests.get")
     def test_sso_second_account_nested_identity_different_sub_and_obo(
         self, get, post, keys
     ):
         keys.return_value = self.jwks
-        post.return_value = response(
-            {
-                "access_token": "obo-access",
-                "refresh_token": "obo-refresh",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
-        )
+        post.return_value.acquire_token_on_behalf_of.return_value = {
+            "access_token": "obo-access",
+            "refresh_token": "obo-refresh",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         get.return_value = response(PROFILE)
         token = self.token()
         result = self.sso(token)
@@ -1199,17 +1357,14 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             self.client.session["graph_tokens"]["entraid-work"]["access_token"],
             "obo-access",
         )
-        data = post.call_args.kwargs["data"]
-        self.assertEqual(data["assertion"], token)
-        self.assertEqual(data["requested_token_use"], "on_behalf_of")
-        self.assertEqual(
-            data["scope"], "https://graph.microsoft.com/.default offline_access"
+        post.return_value.acquire_token_on_behalf_of.assert_called_once_with(
+            token, scopes=["https://graph.microsoft.com/.default"]
         )
         self.assertEqual(
-            post.call_args.args[0],
-            f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token",
+            post.call_args.kwargs["authority"],
+            f"https://login.microsoftonline.com/{TENANT}",
         )
-        self.assertIs(post.call_args.kwargs["allow_redirects"], False)
+        self.assertFalse(post.call_args.kwargs["instance_discovery"])
         self.assertNotIn("obo-access", str(result.json()))
         self.assertEqual(SocialAccount.objects.count(), 3)
         self.account.refresh_from_db()
@@ -1221,7 +1376,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         )
 
     @patch("crm.teams.auth._get_jwks")
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     def test_sso_inactive_unlinked_and_same_email_do_not_authenticate(self, post, keys):
         keys.return_value = self.jwks
         self.user.is_active = False
@@ -1236,38 +1391,38 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertNotIn("_auth_user_id", self.client.session)
 
     @patch("crm.teams.auth._get_jwks")
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     @patch("crm.graph.requests.get")
     def test_sso_obo_graph_identity_mismatch_does_not_login(self, get, post, keys):
         keys.return_value = self.jwks
-        post.return_value = response(
-            {
-                "access_token": "obo-access",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
-        )
+        post.return_value.acquire_token_on_behalf_of.return_value = {
+            "access_token": "obo-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         get.return_value = response({**PROFILE, "id": "different-object"})
         self.assertEqual(self.sso().status_code, 403)
         self.assertNotIn("_auth_user_id", self.client.session)
         self.assertNotIn("graph_tokens", self.client.session)
 
     @patch("crm.teams.auth._get_jwks")
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     def test_sso_obo_errors_are_403_or_502_without_remote_token_text(self, post, keys):
         keys.return_value = self.jwks
-        for status, expected in ((400, 403), (302, 502), (500, 502)):
-            with self.subTest(status=status):
-                post.return_value = response(
-                    {"error_description": "secret-value"}, status
-                )
+        for failure, expected in (
+            ("invalid_grant", 403), ("invalid_response", 502), ("server_error", 502)
+        ):
+            with self.subTest(failure=failure):
+                post.return_value.acquire_token_on_behalf_of.return_value = {
+                    "error": failure, "error_description": "secret-value"
+                }
                 result = self.sso()
                 self.assertEqual(result.status_code, expected)
                 self.assertNotIn("secret-value", str(result.json()))
                 self.assertNotIn("_auth_user_id", self.client.session)
 
     @patch("crm.teams.auth._get_jwks")
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     def test_sso_malformed_obo_token_responses_never_login(self, post, keys):
         keys.return_value = self.jwks
         good = {
@@ -1287,12 +1442,12 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             {**good, "refresh_token": {}},
         ):
             with self.subTest(token=token):
-                post.return_value = response(token)
+                post.return_value.acquire_token_on_behalf_of.return_value = token
                 self.assertEqual(self.sso().status_code, 502)
                 self.assertNotIn("_auth_user_id", self.client.session)
 
     @patch("crm.teams.auth._get_jwks")
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     def test_duplicate_linked_identity_is_rejected_without_obo(self, post, keys):
         keys.return_value = self.jwks
         SocialAccount.objects.create(
@@ -1453,20 +1608,18 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(result.json(), {"id": OID, "tenant_id": TENANT})
 
     @patch("crm.teams.auth._get_jwks")
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     @patch("crm.graph.requests.get")
     def test_fresh_teams_config_cookie_supports_csrf_protected_sso(
         self, get, post, keys
     ):
         keys.return_value = self.jwks
         get.return_value = response(PROFILE)
-        post.return_value = response(
-            {
-                "access_token": "obo-access",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
-        )
+        post.return_value.acquire_token_on_behalf_of.return_value = {
+            "access_token": "obo-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         client = Client(enforce_csrf_checks=True)
         config = client.get("/api/teams/config/")
         data = {"provider_id": "entraid-work", "token": self.token()}
@@ -1491,7 +1644,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         )
 
     @patch("crm.teams.auth._get_jwks")
-    @patch("crm.teams.auth.requests.post")
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
     def test_sso_rejects_short_or_oversized_input_before_token_verification(
         self, post, keys
     ):

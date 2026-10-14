@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 import jwt
+import msal
 import requests
 from allauth.socialaccount.models import SocialAccount
 from django.conf import settings
@@ -229,51 +230,116 @@ def get_teams_account(provider_id, claims):
     return matches[0]
 
 
-def exchange_graph_token(app, *, assertion=None, refresh_token=None, tenant_id=None):
-    """Exchange an assertion or refresh token for delegated Graph credentials.
+GRAPH_SCOPES = ["https://graph.microsoft.com/.default"]
+AUTHORIZATION_ERRORS = {
+    "invalid_grant",
+    "interaction_required",
+    "consent_required",
+    "login_required",
+    "access_denied",
+}
 
-    Returns:
-        The validated token-service response, including its access token.
 
-    Raises:
-        TeamsConfigError: If the provider's tenant configuration is invalid.
-        GraphClientError: If the token service fails or returns invalid data.
-        TokenExpiredError: If authorization must be renewed.
-    """
-    tenant = provider_tenant(app, tenant_id)
-    data = {
-        "client_id": app["client_id"],
-        "client_secret": app["secret"],
-        "scope": "https://graph.microsoft.com/.default offline_access",
-    }
-    if assertion is not None:
-        data.update(
-            {
-                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                "requested_token_use": "on_behalf_of",
-                "assertion": assertion,
-            }
-        )
-    else:
-        data.update({"grant_type": "refresh_token", "refresh_token": refresh_token})
-    try:
+class MSALHTTPClient:
+    """MSAL transport with bounded, non-redirecting, metadata-only tracing."""
+
+    def __init__(self, operation):
+        self.operation = operation
+
+    def _request(self, method, url, **kwargs):
+        kwargs.update(timeout=10, allow_redirects=False)
         response = logged_request(
-            requests.post,
-            f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+            getattr(requests, method.lower()),
+            url,
             service="entraid",
-            operation="on_behalf_of" if assertion is not None else "refresh_token",
-            method="POST",
-            data=data,
-            timeout=10,
-            allow_redirects=False,
+            operation=self.operation if method == "POST" else "discovery",
+            method=method,
+            **kwargs,
         )
-        if response.status_code in (400, 401, 403):
-            raise TokenExpiredError("Graph authorization required. Sign in again.")
         if response.status_code != 200:
+            # Only OAuth error responses are safe for MSAL to interpret.
+            if method != "POST" or response.status_code not in (400, 401, 403):
+                raise GraphClientError("Graph token service unavailable.")
+        try:
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ValueError
+        except (ValueError, TypeError) as exc:
+            # MSAL logs raw non-JSON response bodies; reject them at the boundary.
+            raise GraphClientError("Invalid Graph token service response.") from exc
+        if method == "POST" and "error" in data:
+            if data["error"] in AUTHORIZATION_ERRORS:
+                raise TokenExpiredError("Graph authorization required. Sign in again.")
             raise GraphClientError("Graph token service unavailable.")
-        token = response.json()
+        if response.status_code != 200:
+            raise GraphClientError("Invalid Graph token service response.")
+        return response
+
+    def get(self, url, **kwargs):
+        return self._request("GET", url, **kwargs)
+
+    def post(self, url, **kwargs):
+        return self._request("POST", url, **kwargs)
+
+
+def exchange_graph_token(
+    app, *, assertion=None, refresh_token=None, tenant_id=None, token_cache=None
+):
+    """Acquire delegated credentials, importing legacy refresh tokens into MSAL."""
+    tenant = provider_tenant(app, tenant_id)
+    token_cache = token_cache if token_cache is not None else msal.SerializableTokenCache()
+    try:
+        client = msal.ConfidentialClientApplication(
+            app["client_id"],
+            client_credential=app["secret"],
+            authority=f"https://login.microsoftonline.com/{tenant}",
+            token_cache=token_cache,
+            http_client=MSALHTTPClient(
+                "on_behalf_of" if assertion is not None else "refresh_token"
+            ),
+            instance_discovery=False,
+            enable_pii_log=False,
+        )
+        if assertion is not None:
+            token = client.acquire_token_on_behalf_of(assertion, scopes=GRAPH_SCOPES)
+        elif refresh_token:
+            token = client.acquire_token_by_refresh_token(
+                refresh_token, scopes=GRAPH_SCOPES
+            )
+        else:
+            accounts = client.get_accounts()
+            if len(accounts) == 1:
+                token = client.acquire_token_silent_with_error(
+                    GRAPH_SCOPES, account=accounts[0], force_refresh=True
+                )
+            elif not accounts:
+                # OBO responses need not contain client_info / an MSAL account.
+                # The session-bound cache still owns its refresh credential.
+                credentials = list(
+                    token_cache.search(
+                        msal.TokenCache.CredentialType.REFRESH_TOKEN,
+                        query={
+                            "client_id": app["client_id"],
+                            "environment": "login.microsoftonline.com",
+                        },
+                    )
+                )
+                token = (
+                    client.acquire_token_by_refresh_token(
+                        credentials[0]["secret"], scopes=GRAPH_SCOPES
+                    )
+                    if len(credentials) == 1
+                    else None
+                )
+            else:
+                token = None
+        if token is None and assertion is None and not refresh_token:
+            raise TokenExpiredError("Graph authorization required. Sign in again.")
+        if isinstance(token, dict) and token.get("error") in AUTHORIZATION_ERRORS:
+            raise TokenExpiredError("Graph authorization required. Sign in again.")
         if (
             not isinstance(token, dict)
+            or "error" in token
             or not isinstance(token.get("access_token"), str)
             or not token["access_token"]
             or not isinstance(token.get("token_type"), str)
@@ -285,7 +351,14 @@ def exchange_graph_token(app, *, assertion=None, refresh_token=None, tenant_id=N
             )
         ):
             raise GraphClientError("Invalid Graph token response.")
-    except (requests.RequestException, ValueError) as exc:
+    except (
+        requests.RequestException,
+        ValueError,
+        TypeError,
+        KeyError,
+        AttributeError,
+        RuntimeError,
+    ) as exc:
         raise GraphClientError("Graph token service unavailable.") from exc
     return token
 
@@ -307,9 +380,15 @@ class GraphTokenManager:
         *,
         expires_at=None,
         oid=None,
+        token_cache=None,
     ):
         """Save one provider's token data and mark Graph access as enabled."""
+        if settings.SESSION_ENGINE == "django.contrib.sessions.backends.signed_cookies":
+            raise TeamsConfigError("Graph credentials require server-side sessions.")
         expiry = expires_at or timezone.now() + timedelta(seconds=expires_in)
+        app = graph_provider(provider_id)
+        user_id = getattr(getattr(request, "user", None), "pk", None)
+        user_id = user_id or request.session.get("_auth_user_id")
         request.session[cls.SESSION_KEY] = {
             provider_id: {
                 "access_token": access_token,
@@ -317,6 +396,10 @@ class GraphTokenManager:
                 "expires_at": expiry.isoformat(),
                 "tenant_id": tenant_id,
                 "oid": oid,
+                "user_id": str(user_id) if user_id is not None else None,
+                "provider_id": provider_id,
+                "client_id": app["client_id"] if app else None,
+                "msal_cache": token_cache.serialize() if token_cache is not None else None,
             }
         }
         request.session["graph_enabled"] = True
@@ -327,15 +410,31 @@ class GraphTokenManager:
 
         A refreshed token is checked against the stored Entra object ID when
         available. Invalid or expired authorization raises ``TokenExpiredError``.
+        Legacy sessions without the user/provider/client binding require a fresh
+        sign-in; ordinary OIDC sessions need not contain an Entra object ID.
         """
         app = graph_provider(provider_id)
         token = request.session.get(cls.SESSION_KEY, {}).get(provider_id)
         if not app or not isinstance(token, dict):
             raise TokenExpiredError("Graph authorization required. Sign in again.")
         try:
+            if settings.SESSION_ENGINE == "django.contrib.sessions.backends.signed_cookies":
+                raise ValueError
             tenant = provider_tenant(app, token.get("tenant_id"))
             expiry = datetime.fromisoformat(token["expires_at"])
             if timezone.is_naive(expiry) or token.get("tenant_id") != tenant:
+                raise ValueError
+            user_id = getattr(getattr(request, "user", None), "pk", None)
+            if (
+                not user_id
+                or token.get("user_id") != str(user_id)
+                or token.get("provider_id") != provider_id
+                or token.get("client_id") != app["client_id"]
+                or (
+                    token.get("oid") is not None
+                    and not isinstance(token["oid"], str)
+                )
+            ):
                 raise ValueError
             if (
                 not isinstance(token.get("access_token"), str)
@@ -347,13 +446,22 @@ class GraphTokenManager:
             raise TokenExpiredError("Invalid Graph session. Sign in again.") from exc
         if expiry > timezone.now() + timedelta(seconds=60):
             return token["access_token"]
-        if not token.get("refresh_token"):
+        if not token.get("refresh_token") and not token.get("msal_cache"):
             raise TokenExpiredError("Graph authorization expired. Sign in again.")
         try:
+            token_cache = msal.SerializableTokenCache()
+            if token.get("msal_cache") is not None:
+                try:
+                    token_cache.deserialize(token["msal_cache"])
+                    if not isinstance(json.loads(token["msal_cache"]), dict):
+                        raise ValueError
+                except (ValueError, TypeError, AttributeError) as exc:
+                    raise TokenExpiredError("Invalid Graph session. Sign in again.") from exc
             refreshed = exchange_graph_token(
                 app,
-                refresh_token=token["refresh_token"],
+                refresh_token=token.get("refresh_token"),
                 tenant_id=tenant,
+                token_cache=token_cache,
             )
             if token.get("oid"):
                 profile = GraphClient(refreshed["access_token"], tenant).get_profile()
@@ -366,10 +474,17 @@ class GraphTokenManager:
             request,
             provider_id,
             refreshed["access_token"],
-            refreshed.get("refresh_token") or token["refresh_token"],
+            (
+                token.get("refresh_token")
+                if not list(
+                    token_cache.search(msal.TokenCache.CredentialType.REFRESH_TOKEN)
+                )
+                else None
+            ),
             refreshed["expires_in"],
             tenant,
             oid=token.get("oid"),
+            token_cache=token_cache,
         )
         return refreshed["access_token"]
 

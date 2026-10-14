@@ -6,7 +6,7 @@ from uuid import UUID
 from asgiref.sync import async_to_sync, sync_to_async
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings
 from botbuilder.core.teams import TeamsActivityHandler
-from botbuilder.schema import Activity, InvokeResponse
+from botbuilder.schema import Activity
 from botframework.connector.auth import (
     AuthenticationConfiguration,
     AuthenticationConstants,
@@ -15,6 +15,7 @@ from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+from microsoft_teams.api import InvokeResponse
 from msrest.exceptions import DeserializationError
 
 from ...models import Agent

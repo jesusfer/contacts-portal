@@ -9,14 +9,33 @@ ID and tenant ID. It does not create a Django session or call Graph.
 
 When a user opens the full dashboard, `/api/teams/sso/` matches the verified
 object and tenant IDs to one active account linked through OIDC. Django exchanges
-the Teams token for delegated Graph credentials using the server-side client
-secret. It checks the Graph object ID, then creates the Django session. CRM access
-also requires a provisioned Agent.
+the Teams token for delegated Graph credentials with MSAL and the server-side
+client secret. It checks the Graph object ID, then creates the Django session.
+CRM access also requires a provisioned Agent.
 
-The portal stores server-side Graph access and refresh tokens in the Django
-session. It does not return those tokens or the client secret to the browser.
-Teams tabs acquire their own Graph tokens through the Teams SDK. The two token
-flows are separate.
+MSAL acquires and renews Graph credentials. Django stores the access token and
+serialized MSAL token cache in the server-side session. The cache is bound to the
+user, OIDC provider, tenant, and client ID. Existing OIDC refresh credentials are
+imported into MSAL's cache. Django reuses an access token while it has more than
+60 seconds before expiry; otherwise, MSAL renews it. If a Teams object ID is
+stored, Django checks it again after renewal. Django does not return tokens or the
+client secret to the browser. Graph credentials require server-side Django
+sessions.
+
+Teams tabs acquire their own Graph tokens through the Teams SDK. These tokens use
+an in-memory cache and are separate from the server-side token cache.
+
+## Graph requests
+
+Django uses the Microsoft Graph SDK with delegated credentials. Its transport
+allows only read-only `GET` requests to `/me`, the profile photo, the default
+calendar, Inbox messages, and presence. It uses the portal's logged HTTP
+transport, a 10-second timeout, and does not follow redirects. The portal checks
+Graph response data and validates signed pagination cursors.
+
+The Bot Framework endpoint uses Bot Framework channel authentication. Teams API
+and card models handle messaging-extension results and cards; they do not replace
+the bot's channel authentication or CRM access checks.
 
 ## Entra app registration
 
