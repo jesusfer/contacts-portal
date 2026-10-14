@@ -42,7 +42,12 @@ export function GraphPresenceIndicator({ user }) {
   const label = `Presence: ${presence.availability}${presence.activity ? ` · ${presence.activity}` : ''}`
   return user?.graph_enabled ? (
     <span class={`presence-indicator status-${status}`} role="img" title={label} aria-label={label}>
-      ●
+      <span class="presence-dot" aria-hidden="true">
+        ●
+      </span>
+      <span class="presence-label" aria-hidden="true">
+        {presence.availability}
+      </span>
     </span>
   ) : null
 }
