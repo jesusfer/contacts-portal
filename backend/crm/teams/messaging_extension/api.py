@@ -6,12 +6,12 @@ from django.db.models import Prefetch, Q
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
-from .messaging_extension import plain_text
-from .models import Agent, Call, Contact
-from .teams import (
+from ...models import Agent, Call, Contact
+from ..auth import (
     TeamsConfigError, TeamsTokenError, get_teams_account, graph_provider,
     load_teams_config, validate_teams_token,
 )
+from .text import plain_text
 
 
 RESULT_LIMIT = 25

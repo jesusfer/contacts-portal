@@ -11,8 +11,8 @@ from django.contrib.auth import get_user_model
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from ..api_messaging_extension import RESULT_LIMIT, SUMMARY_LIMIT
-from ..messaging_extension import CARD_BYTE_LIMIT
+from ..teams.messaging_extension.api import RESULT_LIMIT, SUMMARY_LIMIT
+from ..teams.messaging_extension.search import CARD_BYTE_LIMIT
 from ..models import Agent, Appointment, Call, Company, Contact
 
 
@@ -58,7 +58,7 @@ class APIContactSearchTests(TestCase):
             name="Alice", email="alice@example.com", company=self.company,
         )
         self.client = Client(enforce_csrf_checks=True)
-        patcher = patch("crm.teams._get_jwks", return_value=self.jwks)
+        patcher = patch("crm.teams.auth._get_jwks", return_value=self.jwks)
         self.keys = patcher.start()
         self.addCleanup(patcher.stop)
 

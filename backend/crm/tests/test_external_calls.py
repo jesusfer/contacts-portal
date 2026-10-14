@@ -8,7 +8,7 @@ from django.test import SimpleTestCase
 
 from ..external_calls import logged_request
 from ..graph import GraphClient, GraphClientError, TokenExpiredError
-from ..teams import _get_jwks, exchange_graph_token
+from ..teams.auth import _get_jwks, exchange_graph_token
 
 
 class ExternalCallLoggingTests(SimpleTestCase):
@@ -140,7 +140,7 @@ class ExternalCallLoggingTests(SimpleTestCase):
             GraphClient("access-secret").get_photo()
         self.assertNotIn("exception-secret", "\n".join(logs.output))
 
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth.requests.post")
     def test_entra_token_exchanges_are_traced_without_credentials(self, post):
         tenant = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         app = {
@@ -162,7 +162,7 @@ class ExternalCallLoggingTests(SimpleTestCase):
                 self.assertFalse(post.call_args.kwargs["allow_redirects"])
                 self.assertEqual(post.call_args.kwargs["data"]["client_secret"], "client-secret")
 
-    @patch("crm.teams.requests.get")
+    @patch("crm.teams.auth.requests.get")
     def test_signing_key_cache_only_traces_actual_requests(self, get):
         tenant = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         key = f"teams_jwks_{tenant}"
