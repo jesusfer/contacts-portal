@@ -155,7 +155,7 @@ export async function teamsGraphRequest(path: string, { signal }: { signal?: Abo
     }
     operation = me.calendarView.get
   } else if (url.pathname === '/graph/inbox/') {
-    endpoint = '/me/mailFolders/inbox/messages'
+    endpoint = `/me/mailFolders('inbox')/messages`
     params = {
       $select: 'id,subject,body,bodyPreview,from,receivedDateTime,isRead,webLink',
       $orderby: 'receivedDateTime desc',
