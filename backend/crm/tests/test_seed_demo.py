@@ -29,6 +29,7 @@ class SeedDemoTests(TestCase):
                 Call,
                 Appointment,
                 Email,
+                Agent.companies.through,
             )
         }
 
@@ -73,8 +74,9 @@ class SeedDemoTests(TestCase):
         )
         self.assertEqual(Contact.objects.values("company").distinct().count(), 2)
         self.assertFalse(
-            Contact.objects.filter(company__in=agent.companies.all()).exists()
+            Contact.objects.exclude(company__in=agent.companies.all()).exists()
         )
+        self.assert_agent_activity_uses_associated_companies(agent)
         self.assertEqual(
             set(agent.calls.values_list("status", flat=True)), set(Call.Status.values)
         )
@@ -127,6 +129,11 @@ class SeedDemoTests(TestCase):
         )
         self.assertIn("demo-agent", output)
 
+    def assert_agent_activity_uses_associated_companies(self, agent):
+        companies = agent.companies.all()
+        self.assertFalse(agent.calls.exclude(contact__company__in=companies).exists())
+        self.assertFalse(agent.emails.exclude(contact__company__in=companies).exists())
+
     def test_new_user_has_no_password_or_elevated_flags(self):
         output = self.seed(username="  custom-demo  ")
         user = get_user_model().objects.get(username="custom-demo")
@@ -159,9 +166,10 @@ class SeedDemoTests(TestCase):
         self.assertEqual(
             get_user_model().objects.values().get(pk=agent.user_id), before_user
         )
-        self.assertEqual(
-            list(agent.companies.values().order_by("pk")), before_companies
-        )
+        for company in before_companies:
+            self.assertIn(company, list(agent.companies.values()))
+        self.assertEqual(agent.companies.count(), len(before_companies) + 2)
+        self.assert_agent_activity_uses_associated_companies(agent)
         self.assertEqual(agent.calls.count(), 9)
         self.assertFalse(Company.objects.filter(name="Demo Harbor Advisory").exists())
         self.assertNotIn("changepassword", output)
@@ -182,6 +190,7 @@ class SeedDemoTests(TestCase):
             "Demo Harbor Advisory",
             [company.name for company in Agent.objects.get(user=user).companies.all()],
         )
+        self.assert_agent_activity_uses_associated_companies(Agent.objects.get(user=user))
         self.assertNotIn("changepassword", output)
 
     def test_existing_calls_or_emails_skip_without_any_mutations(self):
@@ -225,6 +234,10 @@ class SeedDemoTests(TestCase):
         self.assertEqual(
             Call.objects.filter(agent__user__username="second-demo").count(), 9
         )
+        for username in ("demo-agent", "second-demo"):
+            agent = Agent.objects.get(user__username=username)
+            self.assertEqual(agent.companies.count(), 3)
+            self.assert_agent_activity_uses_associated_companies(agent)
         for model in (Company, Contact):
             self.assertEqual(
                 self.snapshot()[model.__name__], after_first[model.__name__]
