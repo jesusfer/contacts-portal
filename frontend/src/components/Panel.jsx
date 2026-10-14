@@ -1,1 +1,0 @@
-export function Panel({ title, count, action, children }) { return <section class="panel"><div class="panel-heading"><div class="panel-title"><h2>{title}</h2>{count != null && <span class="counter">{count}</span>}</div>{action}</div>{children}</section> }

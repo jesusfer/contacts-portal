@@ -246,8 +246,8 @@ The retained server Graph code is therefore still used and cannot simply be
 deleted: ordinary browser Graph views, full-dashboard Teams SSO, and portal
 session/profile responses depend on it. Graph-only startup does not use it.
 
-Implementation references: `frontend/src/app.jsx`, `frontend/src/teams.js`,
-`frontend/src/teams-graph.js`, `crm/views.py`, `crm/teams.py`, `crm/graph.py`,
+Implementation references: `frontend/src/App.tsx`, `frontend/src/teams.ts`,
+`frontend/src/teams-graph.ts`, `crm/views.py`, `crm/teams.py`, `crm/graph.py`,
 and `crm/signals.py`.
 
 ## Entra application registration
