@@ -1,4 +1,5 @@
 """HTTP views for Teams configuration, sign-in, and customer access."""
+
 from allauth.core import ratelimit
 from django.conf import settings
 from django.contrib.auth import login
@@ -10,12 +11,28 @@ from ..graph import GraphClient
 from ..models import Company
 from ..signals import AUTH_SOURCE_SESSION_KEY
 from .auth import (
-    GraphTokenManager, TeamsConfigError, TeamsTokenError, exchange_graph_token,
-    get_teams_account, graph_provider, load_teams_config, provider_tenant, validate_teams_token,
+    GraphTokenManager,
+    TeamsConfigError,
+    TeamsTokenError,
+    exchange_graph_token,
+    get_teams_account,
+    graph_provider,
+    load_teams_config,
+    provider_tenant,
+    validate_teams_token,
 )
 from ..views import (
-    TEXT, api, call_json, company_json, contact_json, directory_contacts,
-    error, graph_profile_json, payload, scoped_calls, session_json,
+    TEXT,
+    api,
+    call_json,
+    company_json,
+    contact_json,
+    directory_contacts,
+    error,
+    graph_profile_json,
+    payload,
+    scoped_calls,
+    session_json,
 )
 
 
@@ -23,12 +40,26 @@ from ..views import (
 @api(["GET"], agent_required=False)
 def teams_config(request):
     """Expose configured Teams providers for the Teams tab and SSO client."""
-    providers = settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
-    return JsonResponse({"graph_only": settings.TEAMS_GRAPH_ONLY, "providers": [{
-        "id": app["provider_id"], "provider_id": app["provider_id"], "name": app["name"],
-        "client_id": app["client_id"], "resource": app["settings"]["teams"]["resource"],
-        "tenant_id": app["settings"]["teams"]["tenant_id"],
-    } for app in providers if graph_provider(app["provider_id"]) and app["settings"].get("teams")]})
+    providers = settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get(
+        "APPS", []
+    )
+    return JsonResponse(
+        {
+            "graph_only": settings.TEAMS_GRAPH_ONLY,
+            "providers": [
+                {
+                    "id": app["provider_id"],
+                    "provider_id": app["provider_id"],
+                    "name": app["name"],
+                    "client_id": app["client_id"],
+                    "resource": app["settings"]["teams"]["resource"],
+                    "tenant_id": app["settings"]["teams"]["tenant_id"],
+                }
+                for app in providers
+                if graph_provider(app["provider_id"]) and app["settings"].get("teams")
+            ],
+        }
+    )
 
 
 @api(["POST"], agent_required=False)
@@ -49,7 +80,8 @@ def teams_crm_authorized(request):
     app = graph_provider(provider_id)
     return (
         request.session.get("crm_teams_authenticated") is True
-        and app is not None and bool(app["settings"].get("teams"))
+        and app is not None
+        and bool(app["settings"].get("teams"))
         and request.GET.get("provider") == provider_id
     )
 
@@ -59,7 +91,9 @@ def teams_customers(request):
     """Return the customer directory to an authorized Teams CRM tab."""
     if not teams_crm_authorized(request):
         return error("Sign in to the CRM with Teams SSO first.", 403)
-    return JsonResponse({"customers": [company_json(item) for item in Company.objects.all()]})
+    return JsonResponse(
+        {"customers": [company_json(item) for item in Company.objects.all()]}
+    )
 
 
 @api(["GET"])
@@ -68,19 +102,32 @@ def teams_customer(request, pk):
     if not teams_crm_authorized(request):
         return error("Sign in to the CRM with Teams SSO first.", 403)
     company = get_object_or_404(Company, pk=pk)
-    return JsonResponse({
-        "customer": company_json(company),
-        "contacts": [contact_json(item) for item in directory_contacts().filter(company=company)],
-        "calls": [call_json(item) for item in scoped_calls(request).filter(contact__company=company)],
-    })
+    return JsonResponse(
+        {
+            "customer": company_json(company),
+            "contacts": [
+                contact_json(item)
+                for item in directory_contacts().filter(company=company)
+            ],
+            "calls": [
+                call_json(item)
+                for item in scoped_calls(request).filter(contact__company=company)
+            ],
+        }
+    )
 
 
 def _teams_auth(request, *, graph_only=False):
     """Validate Teams SSO, optionally sign in to the CRM, and establish Graph access."""
     if len(request.body) > 32768:
         return error("Teams SSO request is too large.", 400)
-    data = payload(request, {"provider_id": TEXT, "token": TEXT}, required=("provider_id", "token"))
-    if not 256 <= len(data["token"]) <= 16384 or not 1 <= len(data["provider_id"]) <= 255:
+    data = payload(
+        request, {"provider_id": TEXT, "token": TEXT}, required=("provider_id", "token")
+    )
+    if (
+        not 256 <= len(data["token"]) <= 16384
+        or not 1 <= len(data["provider_id"]) <= 255
+    ):
         return error("Invalid Teams SSO input size.", 400)
     provider_id = data["provider_id"]
     if not ratelimit.consume(request, action="login"):
@@ -101,18 +148,29 @@ def _teams_auth(request, *, graph_only=False):
         profile_data = GraphClient(token["access_token"], tenant).get_profile()
         if profile_data.get("id") != claims["oid"]:
             raise TeamsTokenError("Graph identity does not match the Teams identity.")
-        login(request, account.user, backend="allauth.account.auth_backends.AuthenticationBackend")
+        login(
+            request,
+            account.user,
+            backend="allauth.account.auth_backends.AuthenticationBackend",
+        )
         request.session[AUTH_SOURCE_SESSION_KEY] = provider_id
         GraphTokenManager.store_token(
-            request, provider_id, token["access_token"], token.get("refresh_token"),
-            token["expires_in"], tenant, oid=claims["oid"],
+            request,
+            provider_id,
+            token["access_token"],
+            token.get("refresh_token"),
+            token["expires_in"],
+            tenant,
+            oid=claims["oid"],
         )
         request.session["crm_teams_authenticated"] = True
         graph_profile_json(request, profile_data)
-        return JsonResponse({
-            **session_json(request),
-            "teams_identity": {"id": claims["oid"], "tenant_id": tenant},
-        })
+        return JsonResponse(
+            {
+                **session_json(request),
+                "teams_identity": {"id": claims["oid"], "tenant_id": tenant},
+            }
+        )
     except TeamsTokenError as exc:
         return error(exc.public_message, 403)
     except TeamsConfigError:

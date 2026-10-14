@@ -46,25 +46,37 @@ class APITests(TestCase):
         cls.agent.companies.add(cls.company)
         cls.peer_agent.companies.add(cls.company)
         cls.other_agent.companies.add(cls.other_company)
-        cls.contact = Contact.objects.create(name="Alice", email="alice@example.com", company=cls.company)
+        cls.contact = Contact.objects.create(
+            name="Alice", email="alice@example.com", company=cls.company
+        )
         cls.other_contact = Contact.objects.create(
             name="Bob", email="bob@example.com", company=cls.other_company
         )
         cls.call = Call.objects.create(agent=cls.agent, contact=cls.contact)
         cls.peer_call = Call.objects.create(agent=cls.peer_agent, contact=cls.contact)
-        cls.other_call = Call.objects.create(agent=cls.other_agent, contact=cls.other_contact)
+        cls.other_call = Call.objects.create(
+            agent=cls.other_agent, contact=cls.other_contact
+        )
         cls.start = timezone.now() + timedelta(days=1)
         cls.appointment = Appointment.objects.create(
             call=cls.call, starts_at=cls.start, ends_at=cls.start + timedelta(hours=1)
         )
         cls.peer_appointment = Appointment.objects.create(
-            call=cls.peer_call, starts_at=cls.start, ends_at=cls.start + timedelta(hours=1)
+            call=cls.peer_call,
+            starts_at=cls.start,
+            ends_at=cls.start + timedelta(hours=1),
         )
         cls.other_appointment = Appointment.objects.create(
-            call=cls.other_call, starts_at=cls.start, ends_at=cls.start + timedelta(hours=1)
+            call=cls.other_call,
+            starts_at=cls.start,
+            ends_at=cls.start + timedelta(hours=1),
         )
-        cls.email = Email.objects.create(agent=cls.agent, contact=cls.contact, subject="Hello")
-        cls.peer_email = Email.objects.create(agent=cls.peer_agent, contact=cls.contact, subject="Private")
+        cls.email = Email.objects.create(
+            agent=cls.agent, contact=cls.contact, subject="Hello"
+        )
+        cls.peer_email = Email.objects.create(
+            agent=cls.peer_agent, contact=cls.contact, subject="Private"
+        )
         cls.other_email = Email.objects.create(
             agent=cls.other_agent, contact=cls.other_contact, subject="Other"
         )
@@ -85,7 +97,9 @@ class APITests(TestCase):
         self.assertIsNone(response.json()["user"])
         self.assertIn("csrftoken", response.cookies)
         response = self.client.get("/api/session/").json()
-        self.assertEqual(response["agent"]["companies"], [{"id": self.company.id, "name": "First"}])
+        self.assertEqual(
+            response["agent"]["companies"], [{"id": self.company.id, "name": "First"}]
+        )
         self.assertEqual(response["user"]["username"], "agent")
         self.client.force_login(self.unprovisioned)
         self.assertIsNone(self.client.get("/api/session/").json()["agent"])
@@ -104,28 +118,47 @@ class APITests(TestCase):
     def test_csrf_login_mutations_and_logout(self):
         client = Client(enforce_csrf_checks=True)
         credentials = {"username": "agent", "password": "test-passphrase-123"}
-        self.assertEqual(self.send("post", "/api/login/", credentials, client=client).status_code, 403)
+        self.assertEqual(
+            self.send("post", "/api/login/", credentials, client=client).status_code,
+            403,
+        )
         client.get("/api/session/")
         response = self.send(
-            "post", "/api/login/", credentials, client=client,
+            "post",
+            "/api/login/",
+            credentials,
+            client=client,
             HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["user"]["id"], self.user.id)
-        self.assertEqual(self.send("post", "/api/contacts/", {}, client=client).status_code, 403)
-        self.assertEqual(self.send("patch", f"/api/calls/{self.call.id}/", {}, client=client).status_code, 403)
+        self.assertEqual(
+            self.send("post", "/api/contacts/", {}, client=client).status_code, 403
+        )
+        self.assertEqual(
+            self.send(
+                "patch", f"/api/calls/{self.call.id}/", {}, client=client
+            ).status_code,
+            403,
+        )
         self.assertEqual(client.post("/api/logout/").status_code, 403)
-        response = client.post("/api/logout/", HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value)
+        response = client.post(
+            "/api/logout/", HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value
+        )
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["user"])
 
     def test_invalid_login_and_rate_limit(self):
         self.client.logout()
         for _ in range(5):
-            response = self.send("post", "/api/login/", {"username": "agent", "password": "wrong"})
+            response = self.send(
+                "post", "/api/login/", {"username": "agent", "password": "wrong"}
+            )
             self.assertEqual(response.status_code, 401)
         response = self.send(
-            "post", "/api/login/", {"username": "agent", "password": "test-passphrase-123"}
+            "post",
+            "/api/login/",
+            {"username": "agent", "password": "test-passphrase-123"},
         )
         self.assertEqual(response.status_code, 429)
         self.assertIn("Retry-After", response)
@@ -133,140 +166,262 @@ class APITests(TestCase):
     def test_inactive_user_cannot_login(self):
         self.user.is_active = False
         self.user.save()
-        self.assertEqual(self.send(
-            "post", "/api/login/", {"username": "agent", "password": "test-passphrase-123"}
-        ).status_code, 401)
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/login/",
+                {"username": "agent", "password": "test-passphrase-123"},
+            ).status_code,
+            401,
+        )
 
     def test_shared_contact_directory_and_creation_for_selected_company(self):
         result = self.client.get("/api/contacts/").json()["contacts"]
-        self.assertEqual([item["id"] for item in result], [self.contact.id, self.other_contact.id])
+        self.assertEqual(
+            [item["id"] for item in result], [self.contact.id, self.other_contact.id]
+        )
         response = self.send(
-            "post", "/api/contacts/",
-            {"name": "New", "email": "new@example.com", "company_id": self.other_company.id},
+            "post",
+            "/api/contacts/",
+            {
+                "name": "New",
+                "email": "new@example.com",
+                "company_id": self.other_company.id,
+            },
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["company"]["id"], self.other_company.id)
-        self.assertEqual(self.send(
-            "post", "/api/contacts/", {"name": "Missing company", "email": "missing@example.com"}
-        ).status_code, 400)
-        self.assertEqual(self.send(
-            "post", "/api/contacts/",
-            {"name": "New", "email": "new@example.com", "company_id": 999999},
-        ).status_code, 404)
-        self.assertEqual(self.send(
-            "post", "/api/contacts/", {"name": "New", "email": "bad", "company_id": self.company.id}
-        ).status_code, 400)
-        self.assertEqual(self.send(
-            "post", "/api/contacts/",
-            {"name": "New", "email": "new@example.com", "company_id": self.company.id, "agent_id": self.peer_agent.id},
-        ).status_code, 400)
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/contacts/",
+                {"name": "Missing company", "email": "missing@example.com"},
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/contacts/",
+                {"name": "New", "email": "new@example.com", "company_id": 999999},
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/contacts/",
+                {"name": "New", "email": "bad", "company_id": self.company.id},
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/contacts/",
+                {
+                    "name": "New",
+                    "email": "new@example.com",
+                    "company_id": self.company.id,
+                    "agent_id": self.peer_agent.id,
+                },
+            ).status_code,
+            400,
+        )
 
     def test_shared_company_directory_and_creation(self):
         result = self.client.get("/api/companies/").json()["companies"]
-        self.assertEqual(result, [
-            {"id": self.company.id, "name": "First"}, {"id": self.other_company.id, "name": "Second"},
-        ])
+        self.assertEqual(
+            result,
+            [
+                {"id": self.company.id, "name": "First"},
+                {"id": self.other_company.id, "name": "Second"},
+            ],
+        )
         response = self.send("post", "/api/companies/", {"name": "Third"})
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["name"], "Third")
         self.agent.refresh_from_db()
-        self.assertEqual(list(self.agent.companies.values_list("id", flat=True)), [self.company.id])
-        self.assertEqual(self.send("post", "/api/companies/", {"name": ""}).status_code, 400)
-        self.assertEqual(self.send(
-            "post", "/api/companies/", {"name": "New", "agent_id": self.agent.id}
-        ).status_code, 400)
+        self.assertEqual(
+            list(self.agent.companies.values_list("id", flat=True)), [self.company.id]
+        )
+        self.assertEqual(
+            self.send("post", "/api/companies/", {"name": ""}).status_code, 400
+        )
+        self.assertEqual(
+            self.send(
+                "post", "/api/companies/", {"name": "New", "agent_id": self.agent.id}
+            ).status_code,
+            400,
+        )
         self.client.logout()
         self.assertEqual(self.client.get("/api/companies/").status_code, 401)
-        self.assertEqual(self.send("post", "/api/companies/", {"name": "New"}).status_code, 401)
+        self.assertEqual(
+            self.send("post", "/api/companies/", {"name": "New"}).status_code, 401
+        )
 
     def test_all_list_endpoints_exclude_other_agents(self):
-        self.assertEqual([item["id"] for item in self.client.get("/api/calls/").json()["calls"]], [self.call.id])
         self.assertEqual(
-            [item["id"] for item in self.client.get("/api/appointments/").json()["appointments"]],
+            [item["id"] for item in self.client.get("/api/calls/").json()["calls"]],
+            [self.call.id],
+        )
+        self.assertEqual(
+            [
+                item["id"]
+                for item in self.client.get("/api/appointments/").json()["appointments"]
+            ],
             [self.appointment.id],
         )
-        self.assertEqual([item["id"] for item in self.client.get("/api/inbox/").json()["emails"]], [self.email.id])
+        self.assertEqual(
+            [item["id"] for item in self.client.get("/api/inbox/").json()["emails"]],
+            [self.email.id],
+        )
 
     def test_detail_ownership_404_even_same_company(self):
         for path in (
-            f"/api/calls/{self.peer_call.id}/", f"/api/calls/{self.other_call.id}/",
+            f"/api/calls/{self.peer_call.id}/",
+            f"/api/calls/{self.other_call.id}/",
             f"/api/appointments/{self.peer_appointment.id}/",
             f"/api/appointments/{self.other_appointment.id}/",
         ):
             self.assertEqual(self.client.get(path).status_code, 404)
             self.assertEqual(self.send("patch", path, {}).status_code, 404)
         for email in (self.peer_email, self.other_email):
-            self.assertEqual(self.send("patch", f"/api/inbox/{email.id}/", {}).status_code, 404)
+            self.assertEqual(
+                self.send("patch", f"/api/inbox/{email.id}/", {}).status_code, 404
+            )
 
     def test_cross_company_contacts_allowed_and_activity_relations_owned(self):
         response = self.send(
             "post", "/api/calls/", {"contact_id": self.other_contact.id}
         )
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["contact"]["company"]["id"], self.other_company.id)
-        self.assertEqual(Call.objects.get(pk=response.json()["id"]).agent_id, self.agent.id)
+        self.assertEqual(
+            response.json()["contact"]["company"]["id"], self.other_company.id
+        )
+        self.assertEqual(
+            Call.objects.get(pk=response.json()["id"]).agent_id, self.agent.id
+        )
         own_call = response.json()["id"]
         self.assertEqual(self.client.get(f"/api/calls/{own_call}/").status_code, 200)
         response = self.send(
-            "post", "/api/inbox/", {"contact_id": self.other_contact.id, "subject": "Bad"}
+            "post",
+            "/api/inbox/",
+            {"contact_id": self.other_contact.id, "subject": "Bad"},
         )
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(Email.objects.get(pk=response.json()["id"]).agent_id, self.agent.id)
+        self.assertEqual(
+            Email.objects.get(pk=response.json()["id"]).agent_id, self.agent.id
+        )
         imported_email = response.json()["id"]
-        self.assertEqual(self.send(
-            "patch", f"/api/inbox/{imported_email}/", {"is_read": True}
-        ).status_code, 200)
-        self.assertEqual(self.send(
-            "post", "/api/appointments/",
-            {"call_id": own_call, "starts_at": self.start.isoformat(),
-             "ends_at": (self.start + timedelta(hours=1)).isoformat()},
-        ).status_code, 201)
-        self.assertEqual(self.send(
-            "post", "/api/appointments/",
-            {"call_id": self.peer_call.id, "starts_at": self.start.isoformat(),
-             "ends_at": (self.start + timedelta(hours=1)).isoformat()},
-        ).status_code, 404)
-        self.assertEqual(self.send("post", "/api/calls/", {"contact_id": 999999}).status_code, 404)
-        self.assertEqual(self.send(
-            "post", "/api/calls/", {"contact_id": self.other_contact.id, "agent_id": self.other_agent.id}
-        ).status_code, 400)
-        self.assertEqual(self.send(
-            "post", "/api/inbox/",
-            {"contact_id": self.other_contact.id, "subject": "Spoofed", "agent_id": self.other_agent.id},
-        ).status_code, 400)
+        self.assertEqual(
+            self.send(
+                "patch", f"/api/inbox/{imported_email}/", {"is_read": True}
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/appointments/",
+                {
+                    "call_id": own_call,
+                    "starts_at": self.start.isoformat(),
+                    "ends_at": (self.start + timedelta(hours=1)).isoformat(),
+                },
+            ).status_code,
+            201,
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/appointments/",
+                {
+                    "call_id": self.peer_call.id,
+                    "starts_at": self.start.isoformat(),
+                    "ends_at": (self.start + timedelta(hours=1)).isoformat(),
+                },
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.send("post", "/api/calls/", {"contact_id": 999999}).status_code, 404
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/calls/",
+                {"contact_id": self.other_contact.id, "agent_id": self.other_agent.id},
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/inbox/",
+                {
+                    "contact_id": self.other_contact.id,
+                    "subject": "Spoofed",
+                    "agent_id": self.other_agent.id,
+                },
+            ).status_code,
+            400,
+        )
 
     def test_call_creation_and_patch(self):
-        response = self.send("post", "/api/calls/", {"contact_id": self.contact.id, "summary": "Planned"})
+        response = self.send(
+            "post", "/api/calls/", {"contact_id": self.contact.id, "summary": "Planned"}
+        )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["status"], "scheduled")
         self.assertFalse(response.json()["was_rescheduled"])
         self.assertIsNone(response.json()["appointment"])
         self.assertEqual(Call.objects.get(pk=response.json()["id"]).agent, self.agent)
         response = self.send(
-            "patch", f"/api/calls/{self.call.id}/", {"status": "completed", "rating": 4, "summary": "Done"}
+            "patch",
+            f"/api/calls/{self.call.id}/",
+            {"status": "completed", "rating": 4, "summary": "Done"},
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["rating"], 4)
         self.assertEqual(response.json()["appointment"]["id"], self.appointment.id)
-        response = self.send("patch", f"/api/calls/{self.call.id}/", {"status": "missed"})
+        response = self.send(
+            "patch", f"/api/calls/{self.call.id}/", {"status": "missed"}
+        )
         self.assertEqual(response.status_code, 400)
         self.call.refresh_from_db()
         self.assertEqual(self.call.status, "completed")
         self.assertEqual(self.call.rating, 4)
-        response = self.send("patch", f"/api/calls/{self.call.id}/", {"status": "missed", "rating": None})
+        response = self.send(
+            "patch", f"/api/calls/{self.call.id}/", {"status": "missed", "rating": None}
+        )
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["rating"])
-        self.assertEqual(self.send(
-            "patch", f"/api/calls/{self.call.id}/", {"agent_id": self.peer_agent.id}
-        ).status_code, 400)
-        self.assertEqual(self.send(
-            "patch", f"/api/calls/{self.call.id}/", {"contact_id": self.other_contact.id}
-        ).status_code, 400)
+        self.assertEqual(
+            self.send(
+                "patch", f"/api/calls/{self.call.id}/", {"agent_id": self.peer_agent.id}
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.send(
+                "patch",
+                f"/api/calls/{self.call.id}/",
+                {"contact_id": self.other_contact.id},
+            ).status_code,
+            400,
+        )
 
     def test_invalid_ratings_and_status(self):
         for rating in (0, 6, 1.5, "3", True):
             response = self.send(
-                "post", "/api/calls/", {"contact_id": self.contact.id, "status": "completed", "rating": rating}
+                "post",
+                "/api/calls/",
+                {
+                    "contact_id": self.contact.id,
+                    "status": "completed",
+                    "rating": rating,
+                },
             )
             self.assertEqual(response.status_code, 400, response.content)
         for status in ("scheduled", "missed", "rescheduled", "cancelled", "unknown"):
@@ -274,18 +429,29 @@ class APITests(TestCase):
                 "patch", f"/api/calls/{self.call.id}/", {"status": status, "rating": 3}
             )
             self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.send(
-            "patch", f"/api/calls/{self.call.id}/", {"status": "completed", "rating": None}
-        ).status_code, 200)
+        self.assertEqual(
+            self.send(
+                "patch",
+                f"/api/calls/{self.call.id}/",
+                {"status": "completed", "rating": None},
+            ).status_code,
+            200,
+        )
 
     def test_appointment_creation_and_duplicate(self):
         call = Call.objects.create(agent=self.agent, contact=self.contact)
-        data = {"call_id": call.id, "starts_at": self.start.isoformat(),
-                "ends_at": (self.start + timedelta(hours=1)).isoformat(), "notes": "Meeting"}
+        data = {
+            "call_id": call.id,
+            "starts_at": self.start.isoformat(),
+            "ends_at": (self.start + timedelta(hours=1)).isoformat(),
+            "notes": "Meeting",
+        }
         response = self.send("post", "/api/appointments/", data)
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(response.json()["call"]["id"], call.id)
-        self.assertEqual(response.json()["call"]["contact"]["company"]["id"], self.company.id)
+        self.assertEqual(
+            response.json()["call"]["contact"]["company"]["id"], self.company.id
+        )
         self.assertEqual(self.send("post", "/api/appointments/", data).status_code, 400)
 
     def test_schedule_validation(self):
@@ -297,7 +463,9 @@ class APITests(TestCase):
             {"starts_at": "2026-10-10"},
             {"starts_at": None},
         ):
-            response = self.send("patch", f"/api/appointments/{self.appointment.id}/", data)
+            response = self.send(
+                "patch", f"/api/appointments/{self.appointment.id}/", data
+            )
             self.assertEqual(response.status_code, 400, response.content)
         self.appointment.refresh_from_db()
         self.assertEqual(self.appointment.starts_at, self.start)
@@ -308,7 +476,9 @@ class APITests(TestCase):
         path = f"/api/appointments/{self.appointment.id}/"
         response = self.send("patch", path, {"notes": "Only notes"})
         self.assertEqual(response.json()["call"]["status"], "scheduled")
-        response = self.send("patch", path, {"ends_at": (self.start + timedelta(hours=2)).isoformat()})
+        response = self.send(
+            "patch", path, {"ends_at": (self.start + timedelta(hours=2)).isoformat()}
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["call"]["status"], "rescheduled")
         self.assertTrue(response.json()["call"]["was_rescheduled"])
@@ -318,7 +488,9 @@ class APITests(TestCase):
         self.call.status = "completed"
         self.call.rating = 5
         self.call.save()
-        response = self.send("patch", path, {"ends_at": (self.start + timedelta(hours=3)).isoformat()})
+        response = self.send(
+            "patch", path, {"ends_at": (self.start + timedelta(hours=3)).isoformat()}
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["call"]["status"], "completed")
         response = self.send("patch", path, {"notes": "Corrected historical notes"})
@@ -338,45 +510,98 @@ class APITests(TestCase):
 
     def test_inbox_import_and_tracking(self):
         response = self.send(
-            "post", "/api/inbox/", {"contact_id": self.contact.id, "subject": "Imported", "body": "Body"}
+            "post",
+            "/api/inbox/",
+            {"contact_id": self.contact.id, "subject": "Imported", "body": "Body"},
         )
         self.assertEqual(response.status_code, 201, response.content)
         email_id = response.json()["id"]
         self.assertEqual(Email.objects.get(pk=email_id).agent, self.agent)
-        response = self.send("patch", f"/api/inbox/{email_id}/", {"is_read": True, "is_replied": True})
+        response = self.send(
+            "patch", f"/api/inbox/{email_id}/", {"is_read": True, "is_replied": True}
+        )
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["is_replied"])
-        self.assertEqual(self.send("patch", f"/api/inbox/{email_id}/", {"is_read": "true"}).status_code, 400)
-        self.assertEqual(self.send("patch", f"/api/inbox/{email_id}/", {"body": "Changed"}).status_code, 400)
-        self.assertEqual(self.send("patch", f"/api/inbox/{email_id}/", {"agent_id": self.peer_agent.id}).status_code, 400)
+        self.assertEqual(
+            self.send(
+                "patch", f"/api/inbox/{email_id}/", {"is_read": "true"}
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.send(
+                "patch", f"/api/inbox/{email_id}/", {"body": "Changed"}
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.send(
+                "patch", f"/api/inbox/{email_id}/", {"agent_id": self.peer_agent.id}
+            ).status_code,
+            400,
+        )
 
     def test_malformed_payloads(self):
-        for body in ("{", "[]", "null", '"string"', '{"status": NaN}', '{"summary": 3}'):
+        for body in (
+            "{",
+            "[]",
+            "null",
+            '"string"',
+            '{"status": NaN}',
+            '{"summary": 3}',
+        ):
             response = self.client.patch(
-                f"/api/calls/{self.call.id}/", data=body, content_type="application/json"
+                f"/api/calls/{self.call.id}/",
+                data=body,
+                content_type="application/json",
             )
             self.assertEqual(response.status_code, 400, response.content)
         response = self.client.patch(
             f"/api/calls/{self.call.id}/", data=b"\xff", content_type="application/json"
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.client.post("/api/contacts/", {"name": "Wrong content type"}).status_code, 400)
-        for data in ({}, {"contact_id": True}, {"contact_id": -1}, {"contact_id": None}):
+        self.assertEqual(
+            self.client.post(
+                "/api/contacts/", {"name": "Wrong content type"}
+            ).status_code,
+            400,
+        )
+        for data in (
+            {},
+            {"contact_id": True},
+            {"contact_id": -1},
+            {"contact_id": None},
+        ):
             self.assertEqual(self.send("post", "/api/calls/", data).status_code, 400)
 
     def test_kpis_completed_only_and_non_scheduled_denominator(self):
-        for status, rating in (("completed", 5), ("completed", 3), ("completed", None),
-                               ("missed", None), ("rescheduled", None), ("cancelled", None)):
-            Call.objects.create(agent=self.agent, contact=self.contact, status=status, rating=rating)
-        Call.objects.create(agent=self.agent, contact=self.other_contact, status="completed", rating=1)
-        Call.objects.create(agent=self.peer_agent, contact=self.contact, status="completed", rating=1)
+        for status, rating in (
+            ("completed", 5),
+            ("completed", 3),
+            ("completed", None),
+            ("missed", None),
+            ("rescheduled", None),
+            ("cancelled", None),
+        ):
+            Call.objects.create(
+                agent=self.agent, contact=self.contact, status=status, rating=rating
+            )
+        Call.objects.create(
+            agent=self.agent, contact=self.other_contact, status="completed", rating=1
+        )
+        Call.objects.create(
+            agent=self.peer_agent, contact=self.contact, status="completed", rating=1
+        )
         result = self.client.get("/api/kpis/").json()
         self.assertEqual(result["total_calls"], 8)
         self.assertEqual(result["completed_calls"], 4)
         self.assertEqual(result["average_rating"], 3)
         self.assertAlmostEqual(result["missed_percentage"], 100 / 7)
         self.assertAlmostEqual(result["rescheduled_percentage"], 100 / 7)
-        for dimension, identifier in (("by_contact", self.contact.id), ("by_company", self.company.id)):
+        for dimension, identifier in (
+            ("by_contact", self.contact.id),
+            ("by_company", self.company.id),
+        ):
             self.assertEqual(len(result[dimension]), 2)
             self.assertEqual(result[dimension][0]["id"], identifier)
             self.assertEqual(result[dimension][0]["average_rating"], 4)
@@ -404,11 +629,20 @@ class APITests(TestCase):
         response = self.send("patch", path, {"status": "completed", "rating": 5})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["was_rescheduled"])
-        self.assertEqual(self.client.get("/api/kpis/").json()["rescheduled_percentage"], 100)
-        self.assertEqual(self.send("patch", path, {"was_rescheduled": False}).status_code, 400)
-        self.assertEqual(self.send(
-            "post", "/api/calls/", {"contact_id": self.contact.id, "was_rescheduled": True}
-        ).status_code, 400)
+        self.assertEqual(
+            self.client.get("/api/kpis/").json()["rescheduled_percentage"], 100
+        )
+        self.assertEqual(
+            self.send("patch", path, {"was_rescheduled": False}).status_code, 400
+        )
+        self.assertEqual(
+            self.send(
+                "post",
+                "/api/calls/",
+                {"contact_id": self.contact.id, "was_rescheduled": True},
+            ).status_code,
+            400,
+        )
         self.call.refresh_from_db()
         self.call.was_rescheduled = False
         self.call.summary = "History cannot be reset"
@@ -417,8 +651,12 @@ class APITests(TestCase):
         self.assertTrue(self.call.was_rescheduled)
 
     def test_current_rescheduled_fallback_and_existing_history_backfill(self):
-        Call.objects.filter(pk=self.call.id).update(status="rescheduled", was_rescheduled=False)
-        self.assertEqual(self.client.get("/api/kpis/").json()["rescheduled_percentage"], 100)
+        Call.objects.filter(pk=self.call.id).update(
+            status="rescheduled", was_rescheduled=False
+        )
+        self.assertEqual(
+            self.client.get("/api/kpis/").json()["rescheduled_percentage"], 100
+        )
         migration = importlib.import_module("crm.migrations.0002_call_was_rescheduled")
         migration.preserve_existing_reschedules(apps, connection.schema_editor())
         self.call.refresh_from_db()
@@ -426,7 +664,9 @@ class APITests(TestCase):
 
     def test_rescheduled_reset_to_scheduled_excluded_until_completed(self):
         path = f"/api/calls/{self.call.id}/"
-        self.assertEqual(self.send("patch", path, {"status": "rescheduled"}).status_code, 200)
+        self.assertEqual(
+            self.send("patch", path, {"status": "rescheduled"}).status_code, 200
+        )
         response = self.send("patch", path, {"status": "scheduled"})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["was_rescheduled"])
@@ -435,9 +675,10 @@ class APITests(TestCase):
         self.assertEqual(result["total_calls"], 2)
         self.assertEqual(result["missed_percentage"], 100)
         self.assertEqual(result["rescheduled_percentage"], 0)
-        self.assertEqual(self.send(
-            "patch", path, {"status": "completed", "rating": 4}
-        ).status_code, 200)
+        self.assertEqual(
+            self.send("patch", path, {"status": "completed", "rating": 4}).status_code,
+            200,
+        )
         result = self.client.get("/api/kpis/").json()
         self.assertEqual(result["rescheduled_percentage"], 50)
         self.assertEqual(result["missed_percentage"], 50)
@@ -452,15 +693,19 @@ class APITests(TestCase):
             self.assertEqual(self.client.get("/static/unknown.js").status_code, 404)
 
     def test_spa_serves_built_html_and_preserves_static_asset_urls(self):
-        html = b'<html><script type="module" src="/static/assets/app.js"></script></html>'
-        with patch("pathlib.Path.is_file", return_value=True), patch(
-            "pathlib.Path.open", return_value=io.BytesIO(html)
+        html = (
+            b'<html><script type="module" src="/static/assets/app.js"></script></html>'
+        )
+        with (
+            patch("pathlib.Path.is_file", return_value=True),
+            patch("pathlib.Path.open", return_value=io.BytesIO(html)),
         ):
             response = self.client.get("/dashboard")
             self.assertEqual(response.status_code, 200)
             self.assertEqual(b"".join(response.streaming_content), html)
             self.assertEqual(response["Content-Type"], "text/html")
         from django.conf import settings
+
         self.assertEqual(settings.STATIC_URL, "/static/")
 
 
@@ -469,19 +714,41 @@ class ModelTests(TestCase):
     def setUpTestData(cls):
         cls.company = Company.objects.create(name="Company")
         cls.other_company = Company.objects.create(name="Other")
-        cls.agent = Agent.objects.create(user=get_user_model().objects.create_user("agent"))
+        cls.agent = Agent.objects.create(
+            user=get_user_model().objects.create_user("agent")
+        )
         cls.agent.companies.add(cls.company)
-        cls.contact = Contact.objects.create(name="Contact", email="contact@example.com", company=cls.company)
+        cls.contact = Contact.objects.create(
+            name="Contact", email="contact@example.com", company=cls.company
+        )
 
     def test_rating_model_form_and_database_constraints(self):
-        for status, rating in (("scheduled", 4), ("completed", 0), ("completed", 6), ("bad", None)):
-            call = Call(agent=self.agent, contact=self.contact, status=status, rating=rating)
+        for status, rating in (
+            ("scheduled", 4),
+            ("completed", 0),
+            ("completed", 6),
+            ("bad", None),
+        ):
+            call = Call(
+                agent=self.agent, contact=self.contact, status=status, rating=rating
+            )
             with self.assertRaises(ValidationError):
                 call.save()
-            form = CallForm(data={"status": status, "rating": rating, "summary": ""}, instance=call)
+            form = CallForm(
+                data={"status": status, "rating": rating, "summary": ""}, instance=call
+            )
             self.assertFalse(form.is_valid())
             with self.assertRaises(IntegrityError), transaction.atomic():
-                Call.objects.bulk_create([Call(agent=self.agent, contact=self.contact, status=status, rating=rating)])
+                Call.objects.bulk_create(
+                    [
+                        Call(
+                            agent=self.agent,
+                            contact=self.contact,
+                            status=status,
+                            rating=rating,
+                        )
+                    ]
+                )
 
     def test_appointment_model_form_database_and_admin_reschedule(self):
         call = Call.objects.create(agent=self.agent, contact=self.contact)
@@ -489,10 +756,16 @@ class ModelTests(TestCase):
         appointment = Appointment(call=call, starts_at=start, ends_at=start)
         with self.assertRaises(ValidationError):
             appointment.save()
-        self.assertFalse(AppointmentForm(
-            data={"starts_at": start.isoformat(), "ends_at": start.isoformat(), "notes": ""},
-            instance=appointment,
-        ).is_valid())
+        self.assertFalse(
+            AppointmentForm(
+                data={
+                    "starts_at": start.isoformat(),
+                    "ends_at": start.isoformat(),
+                    "notes": "",
+                },
+                instance=appointment,
+            ).is_valid()
+        )
         with self.assertRaises(IntegrityError), transaction.atomic():
             Appointment.objects.bulk_create([appointment])
         appointment.ends_at = start + timedelta(hours=1)
@@ -514,7 +787,9 @@ class ModelTests(TestCase):
         self.assertEqual(call.rating, 4)
 
     def test_cross_company_models_and_independent_company_reassignment(self):
-        other = Contact.objects.create(name="Other", email="other@example.com", company=self.other_company)
+        other = Contact.objects.create(
+            name="Other", email="other@example.com", company=self.other_company
+        )
         for model in (
             Call(agent=self.agent, contact=other),
             Email(agent=self.agent, contact=other, subject="Cross-company"),
@@ -528,7 +803,10 @@ class ModelTests(TestCase):
         self.assertEqual(self.contact.company, self.other_company)
         self.agent.companies.set([self.other_company])
         self.agent.refresh_from_db()
-        self.assertEqual(list(self.agent.companies.values_list("id", flat=True)), [self.other_company.id])
+        self.assertEqual(
+            list(self.agent.companies.values_list("id", flat=True)),
+            [self.other_company.id],
+        )
 
     def test_full_domain_and_social_accounts_registered_in_admin(self):
         for model in (Company, Contact, Agent, Call, Appointment, Email, SocialAccount):
@@ -538,10 +816,20 @@ class ModelTests(TestCase):
 @override_settings(SECURE_SSL_REDIRECT=False)
 class OIDCPageStylingTests(TestCase):
     def setUp(self):
-        configured = configure_oidc(json.dumps([{
-            "id": "nublar", "name": "Nublar", "server_url": "https://issuer.example",
-            "client_id": "portal", "client_secret": "test-value",
-        }]), debug=False)
+        configured = configure_oidc(
+            json.dumps(
+                [
+                    {
+                        "id": "nublar",
+                        "name": "Nublar",
+                        "server_url": "https://issuer.example",
+                        "client_id": "portal",
+                        "client_secret": "test-value",
+                    }
+                ]
+            ),
+            debug=False,
+        )
         self.settings_override = override_settings(SOCIALACCOUNT_PROVIDERS=configured)
         self.settings_override.enable()
         self.addCleanup(self.settings_override.disable)
@@ -612,7 +900,9 @@ class OIDCSettingsTests(TestCase):
         providers = self.providers()
         providers[0].update(id="nublar", name="Nublar")
         configured = configure_oidc(json.dumps(providers), debug=False)
-        with override_settings(SOCIALACCOUNT_PROVIDERS=configured, SECURE_SSL_REDIRECT=False):
+        with override_settings(
+            SOCIALACCOUNT_PROVIDERS=configured, SECURE_SSL_REDIRECT=False
+        ):
             response = self.client.get("/accounts/oidc/nublar/login/?next=/")
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "allauth/layouts/base.html")
@@ -632,38 +922,61 @@ class OIDCSettingsTests(TestCase):
             DJANGO_CSRF_TRUSTED_ORIGINS="https://portal.example, https://second.example",
             DJANGO_SETTINGS_MODULE="config.settings",
         )
-        env["PYTHONPATH"] = os.pathsep.join((
-            str(Path(__file__).resolve().parent.parent.parent), env.get("PYTHONPATH", ""),
-        ))
+        env["PYTHONPATH"] = os.pathsep.join(
+            (
+                str(Path(__file__).resolve().parent.parent.parent),
+                env.get("PYTHONPATH", ""),
+            )
+        )
         result = subprocess.run(
-            [sys.executable, "-c",
-             "from django.conf import settings; "
-             "assert settings.DEBUG is False; "
-             "assert settings.ALLOWED_HOSTS == ['portal.example', 'localhost']; "
-             "assert settings.CSRF_TRUSTED_ORIGINS == ['https://portal.example', 'https://second.example']; "
-             "assert settings.STATIC_URL == '/static/'"],
-            env=env, capture_output=True, text=True, check=False,
+            [
+                sys.executable,
+                "-c",
+                "from django.conf import settings; "
+                "assert settings.DEBUG is False; "
+                "assert settings.ALLOWED_HOSTS == ['portal.example', 'localhost']; "
+                "assert settings.CSRF_TRUSTED_ORIGINS == ['https://portal.example', 'https://second.example']; "
+                "assert settings.STATIC_URL == '/static/'",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_secure_cookie_redirect_and_proxy_environment_defaults(self):
         env = os.environ.copy()
         env.update(
-            DJANGO_DEBUG="0", DJANGO_SECRET_KEY=secrets.token_urlsafe(64),
+            DJANGO_DEBUG="0",
+            DJANGO_SECRET_KEY=secrets.token_urlsafe(64),
             DJANGO_SETTINGS_MODULE="config.settings",
         )
-        env["PYTHONPATH"] = os.pathsep.join((
-            str(Path(__file__).resolve().parent.parent.parent), env.get("PYTHONPATH", ""),
-        ))
-        for name in ("DJANGO_SECURE_COOKIES", "DJANGO_SECURE_SSL_REDIRECT", "DJANGO_TRUST_PROXY"):
+        env["PYTHONPATH"] = os.pathsep.join(
+            (
+                str(Path(__file__).resolve().parent.parent.parent),
+                env.get("PYTHONPATH", ""),
+            )
+        )
+        for name in (
+            "DJANGO_SECURE_COOKIES",
+            "DJANGO_SECURE_SSL_REDIRECT",
+            "DJANGO_TRUST_PROXY",
+        ):
             env.pop(name, None)
         cases = [
             ({}, True, False, None),
             ({"DJANGO_DEBUG": "1"}, False, False, None),
             ({"DJANGO_SECURE_COOKIES": "0"}, False, False, None),
             (
-                {"DJANGO_SECURE_COOKIES": "1", "DJANGO_SECURE_SSL_REDIRECT": "1", "DJANGO_TRUST_PROXY": "1"},
-                True, True, ("HTTP_X_FORWARDED_PROTO", "https"),
+                {
+                    "DJANGO_SECURE_COOKIES": "1",
+                    "DJANGO_SECURE_SSL_REDIRECT": "1",
+                    "DJANGO_TRUST_PROXY": "1",
+                },
+                True,
+                True,
+                ("HTTP_X_FORWARDED_PROTO", "https"),
             ),
         ]
         for changes, cookies, redirect, proxy in cases:
@@ -676,17 +989,30 @@ class OIDCSettingsTests(TestCase):
                 f"assert settings.SECURE_PROXY_SSL_HEADER == {proxy!r}"
             )
             result = subprocess.run(
-                [sys.executable, "-c", code], env=process_env,
-                capture_output=True, text=True, check=False,
+                [sys.executable, "-c", code],
+                env=process_env,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def providers(self):
         return [
-            {"id": "work", "name": "Work", "server_url": "https://issuer.example/",
-             "client_id": "work-client", "client_secret": "test-value"},
-            {"id": "second", "name": "Second", "server_url": "https://second.example",
-             "client_id": "second-client", "client_secret": "test-value"},
+            {
+                "id": "work",
+                "name": "Work",
+                "server_url": "https://issuer.example/",
+                "client_id": "work-client",
+                "client_secret": "test-value",
+            },
+            {
+                "id": "second",
+                "name": "Second",
+                "server_url": "https://second.example",
+                "client_id": "second-client",
+                "client_secret": "test-value",
+            },
         ]
 
     def test_mapping_and_session_provider_urls(self):
@@ -695,16 +1021,24 @@ class OIDCSettingsTests(TestCase):
         self.assertEqual(apps[0]["provider_id"], "work")
         self.assertEqual(apps[0]["settings"]["server_url"], "https://issuer.example")
         self.assertEqual(apps[1]["client_id"], "second-client")
-        with override_settings(SOCIALACCOUNT_PROVIDERS=configured, SECURE_SSL_REDIRECT=False):
+        with override_settings(
+            SOCIALACCOUNT_PROVIDERS=configured, SECURE_SSL_REDIRECT=False
+        ):
             response = self.client.get("/api/session/").json()
             self.assertEqual(len(response["providers"]), 2)
             for provider in response["providers"]:
                 self.assertEqual(
                     provider["login_url"],
-                    reverse("openid_connect_login", kwargs={"provider_id": provider["id"]}),
+                    reverse(
+                        "openid_connect_login", kwargs={"provider_id": provider["id"]}
+                    ),
                 )
-                self.assertEqual(resolve(provider["login_url"]).url_name, "openid_connect_login")
-                adapter_provider = get_adapter().get_provider(RequestFactory().get("/"), provider["id"])
+                self.assertEqual(
+                    resolve(provider["login_url"]).url_name, "openid_connect_login"
+                )
+                adapter_provider = get_adapter().get_provider(
+                    RequestFactory().get("/"), provider["id"]
+                )
                 self.assertEqual(adapter_provider.app.provider_id, provider["id"])
 
     def test_invalid_oidc_config_fails_closed(self):
@@ -712,8 +1046,11 @@ class OIDCSettingsTests(TestCase):
             with self.assertRaises(ImproperlyConfigured):
                 configure_oidc(raw, debug=False)
         for change in (
-            {"server_url": "http://issuer.example"}, {"server_url": "https://issuer.example?bad=1"},
-            {"id": "../bad"}, {"id": "bad id"}, {"client_secret": ""},
+            {"server_url": "http://issuer.example"},
+            {"server_url": "https://issuer.example?bad=1"},
+            {"id": "../bad"},
+            {"id": "bad id"},
+            {"client_secret": ""},
         ):
             providers = self.providers()
             providers[0].update(change)
@@ -731,12 +1068,15 @@ class OIDCSettingsTests(TestCase):
         self.assertFalse(AccountAdapter().is_open_for_signup(None))
         self.assertTrue(SocialAccountAdapter().is_open_for_signup(None, SocialLogin()))
         from django.conf import settings
+
         self.assertFalse(settings.SOCIALACCOUNT_EMAIL_AUTHENTICATION)
         self.assertFalse(settings.SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT)
         self.assertFalse(settings.SOCIALACCOUNT_LOGIN_ON_GET)
 
     def test_linked_social_subject_selects_existing_user_without_agent_assignment(self):
-        user = get_user_model().objects.create_user("linked", email="linked@example.com")
+        user = get_user_model().objects.create_user(
+            "linked", email="linked@example.com"
+        )
         SocialAccount.objects.create(user=user, provider="work", uid="subject-123")
         sociallogin = SocialLogin(
             user=get_user_model()(email="linked@example.com"),

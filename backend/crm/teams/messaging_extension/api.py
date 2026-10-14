@@ -1,4 +1,5 @@
 """Contact cards for the API-based Teams messaging extension."""
+
 from datetime import UTC
 
 from django.conf import settings
@@ -8,8 +9,12 @@ from django.views.decorators.http import require_GET
 
 from ...models import Agent, Call, Contact
 from ..auth import (
-    TeamsConfigError, TeamsTokenError, get_teams_account, graph_provider,
-    load_teams_config, validate_teams_token,
+    TeamsConfigError,
+    TeamsTokenError,
+    get_teams_account,
+    graph_provider,
+    load_teams_config,
+    validate_teams_token,
 )
 from .text import plain_text
 
@@ -33,13 +38,19 @@ def call_history(calls):
     for call in calls:
         details = [f"Call #{call.pk}", call.get_status_display()]
         if hasattr(call, "appointment"):
-            details.append(call.appointment.starts_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC"))
+            details.append(
+                call.appointment.starts_at.astimezone(UTC).strftime(
+                    "%Y-%m-%d %H:%M UTC"
+                )
+            )
         if call.rating is not None:
             details.append(f"Rating: {call.rating}/5")
         summary = call.summary[:SUMMARY_LIMIT]
         if len(call.summary) > SUMMARY_LIMIT:
             summary += "… (summary shortened)"
-        entries.append(plain_text(" · ".join(details) + ("\n\n" + summary if summary else "")))
+        entries.append(
+            plain_text(" · ".join(details) + ("\n\n" + summary if summary else ""))
+        )
     return "\n\n".join(entries) or "No calls recorded."
 
 
@@ -52,11 +63,14 @@ def search_contacts(request):
             raise TeamsConfigError("A Teams API provider is required.")
         config = load_teams_config(app["settings"])
     except TeamsConfigError:
-        return response({"error": "Teams API messaging extension is not configured."}, 503)
+        return response(
+            {"error": "Teams API messaging extension is not configured."}, 503
+        )
 
     authorization = request.headers.get("Authorization", "").split()
     if (
-        len(authorization) != 2 or authorization[0].lower() != "bearer"
+        len(authorization) != 2
+        or authorization[0].lower() != "bearer"
         or len(authorization[1]) > 16384
     ):
         return response({"error": "A delegated bearer token is required."}, 401)
@@ -72,23 +86,35 @@ def search_contacts(request):
 
     queries = request.GET.getlist("query")
     if len(queries) != 1 or not queries[0].strip() or len(queries[0]) > 200:
-        return response({"error": "query must contain between 1 and 200 characters."}, 400)
+        return response(
+            {"error": "query must contain between 1 and 200 characters."}, 400
+        )
     contacts = Contact.objects.select_related("company")
     for term in queries[0].split():
         contacts = contacts.filter(
-            Q(name__icontains=term) | Q(email__icontains=term) | Q(company__name__icontains=term)
+            Q(name__icontains=term)
+            | Q(email__icontains=term)
+            | Q(company__name__icontains=term)
         )
-    contacts = contacts.prefetch_related(Prefetch(
-        "calls",
-        queryset=Call.objects.filter(agent=agent).select_related("appointment").order_by("-id")[:3],
-        to_attr="recent_calls",
-    ))[:RESULT_LIMIT]
-    return response({"contacts": [
+    contacts = contacts.prefetch_related(
+        Prefetch(
+            "calls",
+            queryset=Call.objects.filter(agent=agent)
+            .select_related("appointment")
+            .order_by("-id")[:3],
+            to_attr="recent_calls",
+        )
+    )[:RESULT_LIMIT]
+    return response(
         {
-            "name": plain_text(contact.name),
-            "email": plain_text(contact.email),
-            "customer": plain_text(contact.company.name),
-            "calls": call_history(contact.recent_calls),
+            "contacts": [
+                {
+                    "name": plain_text(contact.name),
+                    "email": plain_text(contact.email),
+                    "customer": plain_text(contact.company.name),
+                    "calls": call_history(contact.recent_calls),
+                }
+                for contact in contacts
+            ]
         }
-        for contact in contacts
-    ]})
+    )

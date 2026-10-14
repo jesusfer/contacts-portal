@@ -11,7 +11,6 @@ def populate_agent_companies(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("crm", "0004_agent_companies_alter_agent_company"),
     ]

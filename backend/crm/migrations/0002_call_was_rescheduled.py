@@ -10,15 +10,14 @@ def preserve_existing_reschedules(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('crm', '0001_initial'),
+        ("crm", "0001_initial"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='call',
-            name='was_rescheduled',
+            model_name="call",
+            name="was_rescheduled",
             field=models.BooleanField(default=False, editable=False),
         ),
         migrations.RunPython(preserve_existing_reschedules, migrations.RunPython.noop),

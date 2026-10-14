@@ -47,7 +47,9 @@ urlpatterns = [
     ACCOUNT_AUTHENTICATED_LOGIN_REDIRECTS=False,
     STORAGES={
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
     },
 )
 class LoginSourceTests(TestCase):
@@ -99,15 +101,22 @@ class LoginSourceTests(TestCase):
         self.assertNotIn(AUTH_SOURCE_SESSION_KEY, self.client.session)
 
     def test_actual_social_completion_selects_provider_for_same_user(self):
-        for provider_id, expected in (("partner", "Ping"), ("corporate", "Entra ID"), ("partner", "Ping")):
+        for provider_id, expected in (
+            ("partner", "Ping"),
+            ("corporate", "Entra ID"),
+            ("partner", "Ping"),
+        ):
             with self.subTest(provider_id=provider_id):
                 self.assertEqual(self.social_login(provider_id).status_code, 302)
                 response = self.client.get("/api/session/").json()
                 self.assertEqual(response["user"]["id"], self.user.pk)
                 self.assertEqual(response["user"]["auth_source"], expected)
-                self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], provider_id)
                 self.assertEqual(
-                    set(response["user"]), {"id", "username", "name", "auth_source", "picture_url"}
+                    self.client.session[AUTH_SOURCE_SESSION_KEY], provider_id
+                )
+                self.assertEqual(
+                    set(response["user"]),
+                    {"id", "username", "name", "auth_source", "picture_url"},
                 )
                 self.assertNotIn("fixture", str(response))
                 self.assertNotIn("linked-subject", str(response))
@@ -183,11 +192,15 @@ class LoginSourceTests(TestCase):
         self.social_login("partner")
         with patch.object(SocialAccountAdapter, "send_notification_mail"):
             self.assertEqual(
-                self.social_login("corporate", subject="new-subject", process="connect").status_code,
+                self.social_login(
+                    "corporate", subject="new-subject", process="connect"
+                ).status_code,
                 302,
             )
         self.assertTrue(
-            self.user.socialaccount_set.filter(provider="corporate", uid="new-subject").exists()
+            self.user.socialaccount_set.filter(
+                provider="corporate", uid="new-subject"
+            ).exists()
         )
         self.assertEqual(self.source(), "Ping")
         self.assertEqual(self.client.session[AUTH_SOURCE_SESSION_KEY], "partner")
@@ -196,7 +209,9 @@ class LoginSourceTests(TestCase):
         self.local_login()
         with patch.object(SocialAccountAdapter, "send_notification_mail"):
             self.assertEqual(
-                self.social_login("corporate", subject="new-subject", process="connect").status_code,
+                self.social_login(
+                    "corporate", subject="new-subject", process="connect"
+                ).status_code,
                 302,
             )
         self.assertEqual(self.source(), "Local")
@@ -207,7 +222,9 @@ class LoginSourceTests(TestCase):
         with override_settings(SOCIALACCOUNT_PROVIDERS={}):
             self.assertEqual(self.source(), "OIDC")
         with override_settings(
-            SOCIALACCOUNT_PROVIDERS={"openid_connect": {"APPS": [PROVIDERS["openid_connect"]["APPS"][1]]}}
+            SOCIALACCOUNT_PROVIDERS={
+                "openid_connect": {"APPS": [PROVIDERS["openid_connect"]["APPS"][1]]}
+            }
         ):
             self.assertEqual(self.source(), "OIDC")
         self.mark_source("unknown")
@@ -249,7 +266,11 @@ class LoginSourceTests(TestCase):
         self.social_login("partner")
         response = self.client.post(
             "/admin/login/",
-            {"username": self.user.username, "password": "test-passphrase-123", "next": "/admin/"},
+            {
+                "username": self.user.username,
+                "password": "test-passphrase-123",
+                "next": "/admin/",
+            },
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.source(), "Local")
@@ -258,7 +279,8 @@ class LoginSourceTests(TestCase):
     def test_failed_admin_password_login_preserves_source(self):
         self.social_login("partner")
         response = self.client.post(
-            "/admin/login/", {"username": self.user.username, "password": "wrong", "next": "/admin/"}
+            "/admin/login/",
+            {"username": self.user.username, "password": "wrong", "next": "/admin/"},
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.source(), "Ping")

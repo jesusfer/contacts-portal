@@ -53,7 +53,14 @@ class AppointmentAdmin(admin.ModelAdmin):
 
 @admin.register(Email)
 class EmailAdmin(admin.ModelAdmin):
-    list_display = ["subject", "contact", "agent", "received_at", "is_read", "is_replied"]
+    list_display = [
+        "subject",
+        "contact",
+        "agent",
+        "received_at",
+        "is_read",
+        "is_replied",
+    ]
     list_filter = ["is_read", "is_replied", "agent__companies"]
     search_fields = ["subject", "body", "contact__email", "agent__user__username"]
     autocomplete_fields = ["agent", "contact"]

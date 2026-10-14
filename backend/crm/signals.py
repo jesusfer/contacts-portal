@@ -2,7 +2,12 @@ from allauth.account.signals import user_logged_in as allauth_user_logged_in
 from django.contrib.auth.signals import user_logged_in, user_logged_out
 from django.dispatch import receiver
 
-from .teams.auth import GraphTokenManager, account_identity, graph_provider, provider_tenant
+from .teams.auth import (
+    GraphTokenManager,
+    account_identity,
+    graph_provider,
+    provider_tenant,
+)
 
 
 AUTH_SOURCE_SESSION_KEY = "crm_auth_source"
@@ -33,8 +38,13 @@ def store_graph_tokens(sender, request, user, sociallogin=None, **kwargs):
     except ValueError:
         return
     GraphTokenManager.store_token(
-        request, provider_id, token.token, token.token_secret,
-        tenant_id=tenant, expires_at=token.expires_at, oid=oid,
+        request,
+        provider_id,
+        token.token,
+        token.token_secret,
+        tenant_id=tenant,
+        expires_at=token.expires_at,
+        oid=oid,
     )
 
 

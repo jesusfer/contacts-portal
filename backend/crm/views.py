@@ -5,7 +5,12 @@ from functools import wraps
 from allauth.core import ratelimit
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, login, logout
-from django.core.exceptions import ObjectDoesNotExist, RequestDataTooBig, SuspiciousOperation, ValidationError
+from django.core.exceptions import (
+    ObjectDoesNotExist,
+    RequestDataTooBig,
+    SuspiciousOperation,
+    ValidationError,
+)
 from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
@@ -45,21 +50,29 @@ def api(methods, *, agent_required=True):
                 try:
                     request.agent = Agent.objects.get(user=request.user)
                 except Agent.DoesNotExist:
-                    return error("Your account has not been provisioned with an agent.", 403)
+                    return error(
+                        "Your account has not been provisioned with an agent.", 403
+                    )
             try:
                 return view(request, *args, **kwargs)
             except Http404:
                 return error("Not found.", 404)
             except ValidationError as exc:
-                return error("Validation failed.", fields=getattr(exc, "message_dict", {"__all__": exc.messages}))
+                return error(
+                    "Validation failed.",
+                    fields=getattr(exc, "message_dict", {"__all__": exc.messages}),
+                )
             except IntegrityError:
-                return error("The data conflicts with an existing record or constraint.", 400)
+                return error(
+                    "The data conflicts with an existing record or constraint.", 400
+                )
             except GraphClientError as exc:
                 return error(exc.public_message, exc.status)
             except InvalidCursor:
                 return error("Invalid or expired page cursor.", 400)
             except (SuspiciousOperation, MultiPartParserError):
                 return error("Malformed or oversized request.", 400)
+
         @wraps(view)
         def wrapped(request, *args, **kwargs):
             response = dispatch(request, *args, **kwargs)
@@ -69,7 +82,9 @@ def api(methods, *, agent_required=True):
             ):
                 patch_cache_control(response, private=True, no_store=True)
             return response
+
         return wrapped
+
     return decorate
 
 
@@ -112,7 +127,9 @@ def save_form(form_class, instance, changes):
     data.update(changes)
     form = form_class(data=data, instance=instance)
     if not form.is_valid():
-        raise ValidationError({field: list(messages) for field, messages in form.errors.items()})
+        raise ValidationError(
+            {field: list(messages) for field, messages in form.errors.items()}
+        )
     return form.save()
 
 
@@ -187,7 +204,9 @@ def session_json(request):
             auth_source = next(
                 (
                     app["name"]
-                    for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
+                    for app in settings.SOCIALACCOUNT_PROVIDERS.get(
+                        "openid_connect", {}
+                    ).get("APPS", [])
                     if app["provider_id"] == provider_id
                 ),
                 "OIDC",
@@ -200,18 +219,27 @@ def session_json(request):
             "picture_url": picture_url(request.user),
         }
         if graph_enabled(request):
-            user.update({
-                "email": request.user.email, "first_name": request.user.first_name,
-                "last_name": request.user.last_name, "read_only": True, "graph_enabled": True,
-                "picture_url": None,
-            })
+            user.update(
+                {
+                    "email": request.user.email,
+                    "first_name": request.user.first_name,
+                    "last_name": request.user.last_name,
+                    "read_only": True,
+                    "graph_enabled": True,
+                    "picture_url": None,
+                }
+            )
             try:
                 details = graph_profile_json(request)
-                user.update({
-                    "name": details["display_name"] or user["name"],
-                    "email": details["email"], "first_name": details["first_name"],
-                    "last_name": details["last_name"], "picture_url": details["picture_url"],
-                })
+                user.update(
+                    {
+                        "name": details["display_name"] or user["name"],
+                        "email": details["email"],
+                        "first_name": details["first_name"],
+                        "last_name": details["last_name"],
+                        "picture_url": details["picture_url"],
+                    }
+                )
             except GraphClientError as exc:
                 graph_error = exc.public_message
         try:
@@ -225,10 +253,15 @@ def session_json(request):
             pass
     providers = [
         {
-            "id": app["provider_id"], "name": app["name"],
-            "login_url": reverse("openid_connect_login", kwargs={"provider_id": app["provider_id"]}),
+            "id": app["provider_id"],
+            "name": app["name"],
+            "login_url": reverse(
+                "openid_connect_login", kwargs={"provider_id": app["provider_id"]}
+            ),
         }
-        for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get("APPS", [])
+        for app in settings.SOCIALACCOUNT_PROVIDERS.get("openid_connect", {}).get(
+            "APPS", []
+        )
     ]
     result = {"user": user, "agent": agent, "providers": providers}
     if graph_error:
@@ -237,7 +270,11 @@ def session_json(request):
 
 
 def picture_url(user):
-    return "/api/profile/picture/" if UserProfile.objects.filter(user=user).exclude(picture="").exists() else None
+    return (
+        "/api/profile/picture/"
+        if UserProfile.objects.filter(user=user).exclude(picture="").exists()
+        else None
+    )
 
 
 def profile_json(user):
@@ -260,17 +297,28 @@ def profile(request):
             return error("Graph profiles are read-only.", 403)
         try:
             details = graph_profile_json(request)
-            return JsonResponse({
-                "id": request.user.pk, "username": request.user.get_username(),
-                "first_name": details["first_name"], "last_name": details["last_name"],
-                "email": details["email"], "picture_url": details["picture_url"],
-                "read_only": True, "graph_enabled": True,
-            })
+            return JsonResponse(
+                {
+                    "id": request.user.pk,
+                    "username": request.user.get_username(),
+                    "first_name": details["first_name"],
+                    "last_name": details["last_name"],
+                    "email": details["email"],
+                    "picture_url": details["picture_url"],
+                    "read_only": True,
+                    "graph_enabled": True,
+                }
+            )
         except GraphClientError as exc:
-            return JsonResponse({
-                **profile_json(request.user), "read_only": True, "graph_enabled": True,
-                "picture_url": None, "graph_error": exc.public_message,
-            })
+            return JsonResponse(
+                {
+                    **profile_json(request.user),
+                    "read_only": True,
+                    "graph_enabled": True,
+                    "picture_url": None,
+                    "graph_error": exc.public_message,
+                }
+            )
     if request.method == "PATCH":
         data = payload(request, {"first_name": TEXT, "last_name": TEXT})
         for field, value in data.items():
@@ -292,7 +340,9 @@ def profile_picture(request):
             return error("Graph profiles are read-only.", 403)
         return graph_picture(request)
     if request.method == "GET":
-        item = get_object_or_404(UserProfile.objects.exclude(picture=""), user=request.user)
+        item = get_object_or_404(
+            UserProfile.objects.exclude(picture=""), user=request.user
+        )
         try:
             stream = item.picture.open("rb")
         except FileNotFoundError:
@@ -306,8 +356,14 @@ def profile_picture(request):
     if request.method == "POST":
         if request.content_type != "multipart/form-data":
             raise ValidationError("Content-Type must be multipart/form-data.")
-        if request.POST or set(request.FILES) != {"picture"} or len(request.FILES.getlist("picture")) != 1:
-            raise ValidationError("Upload exactly one picture field and no other fields.")
+        if (
+            request.POST
+            or set(request.FILES) != {"picture"}
+            or len(request.FILES.getlist("picture")) != 1
+        ):
+            raise ValidationError(
+                "Upload exactly one picture field and no other fields."
+            )
         normalized = normalize_picture(request.FILES["picture"])
     storage = UserProfile._meta.get_field("picture").storage
     new_name = None
@@ -343,7 +399,9 @@ def session(request):
 
 @api(["POST"], agent_required=False)
 def password_login(request):
-    data = payload(request, {"username": TEXT, "password": TEXT}, required=("username", "password"))
+    data = payload(
+        request, {"username": TEXT, "password": TEXT}, required=("username", "password")
+    )
     if not ratelimit.consume(request, action="login") or not ratelimit.consume(
         request, action="login_failed", key=data["username"].casefold(), dry_run=True
     ):
@@ -352,7 +410,9 @@ def password_login(request):
         return response
     user = authenticate(request, **data)
     if user is None:
-        ratelimit.consume(request, action="login_failed", key=data["username"].casefold())
+        ratelimit.consume(
+            request, action="login_failed", key=data["username"].casefold()
+        )
         return error("Invalid username or password.", 401)
     login(request, user)
     ratelimit.clear(request, action="login_failed", key=data["username"].casefold())
@@ -372,11 +432,15 @@ def directory_contacts():
 
 
 def scoped_calls(request):
-    return Call.objects.filter(agent=request.agent).select_related("contact__company", "appointment")
+    return Call.objects.filter(agent=request.agent).select_related(
+        "contact__company", "appointment"
+    )
 
 
 def scoped_appointments(request):
-    return Appointment.objects.filter(call__agent=request.agent).select_related("call__contact__company")
+    return Appointment.objects.filter(call__agent=request.agent).select_related(
+        "call__contact__company"
+    )
 
 
 def scoped_emails(request):
@@ -386,7 +450,9 @@ def scoped_emails(request):
 @api(["GET", "POST"])
 def companies(request):
     if request.method == "GET":
-        return JsonResponse({"companies": [company_json(item) for item in Company.objects.all()]})
+        return JsonResponse(
+            {"companies": [company_json(item) for item in Company.objects.all()]}
+        )
     data = payload(request, {"name": TEXT}, required=("name",))
     company = save_form(CompanyForm, Company(), data)
     return JsonResponse(company_json(company), status=201)
@@ -395,9 +461,12 @@ def companies(request):
 @api(["GET", "POST"])
 def contacts(request):
     if request.method == "GET":
-        return JsonResponse({"contacts": [contact_json(item) for item in directory_contacts()]})
+        return JsonResponse(
+            {"contacts": [contact_json(item) for item in directory_contacts()]}
+        )
     data = payload(
-        request, {"name": TEXT, "email": TEXT, "company_id": ID},
+        request,
+        {"name": TEXT, "email": TEXT, "company_id": ID},
         required=("name", "email", "company_id"),
     )
     company = get_object_or_404(Company, pk=data.pop("company_id"))
@@ -408,9 +477,12 @@ def contacts(request):
 @api(["GET", "POST"])
 def calls(request):
     if request.method == "GET":
-        return JsonResponse({"calls": [call_json(item) for item in scoped_calls(request)]})
+        return JsonResponse(
+            {"calls": [call_json(item) for item in scoped_calls(request)]}
+        )
     data = payload(
-        request, {"contact_id": ID, "status": TEXT, "summary": TEXT, "rating": RATING},
+        request,
+        {"contact_id": ID, "status": TEXT, "summary": TEXT, "rating": RATING},
         required=("contact_id",),
     )
     contact = get_object_or_404(directory_contacts(), pk=data.pop("contact_id"))
@@ -432,9 +504,16 @@ def call_detail(request, pk):
 @api(["GET", "POST"])
 def appointments(request):
     if request.method == "GET":
-        return JsonResponse({"appointments": [appointment_json(item) for item in scoped_appointments(request)]})
+        return JsonResponse(
+            {
+                "appointments": [
+                    appointment_json(item) for item in scoped_appointments(request)
+                ]
+            }
+        )
     data = payload(
-        request, {"call_id": ID, "starts_at": TEXT, "ends_at": TEXT, "notes": TEXT},
+        request,
+        {"call_id": ID, "starts_at": TEXT, "ends_at": TEXT, "notes": TEXT},
         required=("call_id", "starts_at", "ends_at"),
     )
     call = get_object_or_404(scoped_calls(request), pk=data.pop("call_id"))
@@ -445,10 +524,14 @@ def appointments(request):
 @api(["GET", "PATCH"])
 def appointment_detail(request, pk):
     if request.method == "GET":
-        return JsonResponse(appointment_json(get_object_or_404(scoped_appointments(request), pk=pk)))
+        return JsonResponse(
+            appointment_json(get_object_or_404(scoped_appointments(request), pk=pk))
+        )
     data = payload(request, {"starts_at": TEXT, "ends_at": TEXT, "notes": TEXT})
     with transaction.atomic():
-        appointment = get_object_or_404(scoped_appointments(request).select_for_update(), pk=pk)
+        appointment = get_object_or_404(
+            scoped_appointments(request).select_for_update(), pk=pk
+        )
         appointment = save_form(AppointmentForm, appointment, data)
         appointment.refresh_from_db()
     return JsonResponse(appointment_json(appointment))
@@ -457,17 +540,27 @@ def appointment_detail(request, pk):
 @api(["GET", "POST"])
 def inbox(request):
     if request.method == "GET":
-        return JsonResponse({"emails": [email_json(item) for item in scoped_emails(request)]})
+        return JsonResponse(
+            {"emails": [email_json(item) for item in scoped_emails(request)]}
+        )
     data = payload(
         request,
         {
-            "contact_id": ID, "subject": TEXT, "body": TEXT, "received_at": TEXT,
-            "is_read": BOOL, "is_replied": BOOL,
+            "contact_id": ID,
+            "subject": TEXT,
+            "body": TEXT,
+            "received_at": TEXT,
+            "is_read": BOOL,
+            "is_replied": BOOL,
         },
         required=("contact_id", "subject"),
     )
     contact = get_object_or_404(directory_contacts(), pk=data.pop("contact_id"))
-    email = save_form(EmailForm, Email(agent=request.agent, contact=contact, received_at=timezone.now()), data)
+    email = save_form(
+        EmailForm,
+        Email(agent=request.agent, contact=contact, received_at=timezone.now()),
+        data,
+    )
     return JsonResponse(email_json(email), status=201)
 
 
@@ -503,11 +596,17 @@ def kpis(request):
         ),
     )
     denominator = totals.pop("non_scheduled")
-    totals["missed_percentage"] = 100 * totals.pop("missed") / denominator if denominator else 0
-    totals["rescheduled_percentage"] = 100 * totals.pop("rescheduled") / denominator if denominator else 0
+    totals["missed_percentage"] = (
+        100 * totals.pop("missed") / denominator if denominator else 0
+    )
+    totals["rescheduled_percentage"] = (
+        100 * totals.pop("rescheduled") / denominator if denominator else 0
+    )
     for key, prefix in (("by_contact", "contact"), ("by_company", "contact__company")):
-        rows = queryset.values(f"{prefix}__id", f"{prefix}__name").annotate(**aggregates()).order_by(
-            f"{prefix}__name", f"{prefix}__id"
+        rows = (
+            queryset.values(f"{prefix}__id", f"{prefix}__name")
+            .annotate(**aggregates())
+            .order_by(f"{prefix}__name", f"{prefix}__id")
         )
         totals[key] = [
             {
@@ -518,8 +617,6 @@ def kpis(request):
             for row in rows
         ]
     return JsonResponse(totals)
-
-
 
 
 def graph_enabled(request):
@@ -534,7 +631,10 @@ def _get_graph_client(request):
     token = GraphTokenManager.get_token(request, provider_id)
     tenant = request.session[GraphTokenManager.SESSION_KEY][provider_id]["tenant_id"]
     return GraphClient(
-        token, tenant, user_id=request.user.pk, provider_id=provider_id,
+        token,
+        tenant,
+        user_id=request.user.pk,
+        provider_id=provider_id,
     )
 
 
@@ -543,13 +643,16 @@ def graph_profile_json(request, details=None):
         if details is None:
             details = _get_graph_client(request).get_profile()
         stored = request.session.get(GraphTokenManager.SESSION_KEY, {}).get(
-            request.session.get(AUTH_SOURCE_SESSION_KEY), {},
+            request.session.get(AUTH_SOURCE_SESSION_KEY),
+            {},
         )
         if stored.get("oid") and details.get("id") != stored["oid"]:
             raise TokenExpiredError("Graph identity mismatch. Sign in again.")
         request._graph_profile = {
-            "id": details.get("id"), "display_name": details.get("displayName") or "",
-            "first_name": details.get("givenName") or "", "last_name": details.get("surname") or "",
+            "id": details.get("id"),
+            "display_name": details.get("displayName") or "",
+            "first_name": details.get("givenName") or "",
+            "last_name": details.get("surname") or "",
             "email": details.get("mail") or details.get("userPrincipalName") or "",
             "mail": details.get("mail"),
             "user_principal_name": details.get("userPrincipalName"),
@@ -584,26 +687,48 @@ def graph_calendar(request):
     if not request.user.is_authenticated:
         return error("Authentication required.", 401)
     from django.utils.dateparse import parse_datetime
+
     now = timezone.now()
     try:
-        start_dt = parse_datetime(request.GET["start"]) if "start" in request.GET else now - timedelta(days=30)
-        end_dt = parse_datetime(request.GET["end"]) if "end" in request.GET else now + timedelta(days=30)
-        if not start_dt or not end_dt or timezone.is_naive(start_dt) or timezone.is_naive(end_dt):
+        start_dt = (
+            parse_datetime(request.GET["start"])
+            if "start" in request.GET
+            else now - timedelta(days=30)
+        )
+        end_dt = (
+            parse_datetime(request.GET["end"])
+            if "end" in request.GET
+            else now + timedelta(days=30)
+        )
+        if (
+            not start_dt
+            or not end_dt
+            or timezone.is_naive(start_dt)
+            or timezone.is_naive(end_dt)
+        ):
             raise ValueError
         if start_dt >= end_dt or end_dt - start_dt > timedelta(days=366):
             raise ValueError
     except (ValueError, TypeError):
-        return error("Use an ordered, timezone-aware ISO 8601 range of at most 366 days.", 400)
-    return JsonResponse(_get_graph_client(request).get_calendar_view(
-        start_dt, end_dt, page=request.GET.get("page"),
-    ))
+        return error(
+            "Use an ordered, timezone-aware ISO 8601 range of at most 366 days.", 400
+        )
+    return JsonResponse(
+        _get_graph_client(request).get_calendar_view(
+            start_dt,
+            end_dt,
+            page=request.GET.get("page"),
+        )
+    )
 
 
 @api(["GET"], agent_required=False)
 def graph_inbox(request):
     if not request.user.is_authenticated:
         return error("Authentication required.", 401)
-    return JsonResponse(_get_graph_client(request).get_mailbox_messages(page=request.GET.get("page")))
+    return JsonResponse(
+        _get_graph_client(request).get_mailbox_messages(page=request.GET.get("page"))
+    )
 
 
 @api(["GET"], agent_required=False)
