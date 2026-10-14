@@ -1,3 +1,4 @@
+// Provides Graph calendar and inbox pages within a Teams workspace.
 import { useEffect, useState } from 'preact/hooks'
 import { GraphPresenceIndicator } from '../components/GraphPresenceIndicator.tsx'
 import { ErrorNotice } from '../components/ErrorNotice.tsx'

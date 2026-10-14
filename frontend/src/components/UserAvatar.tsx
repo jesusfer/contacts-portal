@@ -1,3 +1,4 @@
+// Displays a user's initials or profile photo, including Teams Graph photos.
 import { useEffect, useState } from 'preact/hooks'
 import * as TeamsGraph from '../teams-graph.ts'
 import { initials } from '../utils/data.ts'

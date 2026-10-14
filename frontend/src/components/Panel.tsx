@@ -1,3 +1,4 @@
+// Provides a titled content panel with optional count and action.
 import type { ComponentChildren } from 'preact'
 
 interface PanelProps {

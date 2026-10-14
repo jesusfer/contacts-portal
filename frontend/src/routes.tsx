@@ -1,3 +1,4 @@
+// Maps standalone paths and workspace hashes to their page components.
 import { Empty } from './components/Empty.tsx'
 import { AppointmentDetail } from './pages/AppointmentDetail.tsx'
 import { Calendar } from './pages/Calendar.tsx'

@@ -1,3 +1,4 @@
+// Provides forms for creating CRM calls and appointments.
 import { useState } from 'preact/hooks'
 import { api, appointmentPayload, useResource } from '../utils/data.ts'
 import { AppointmentFields } from '../components/AppointmentFields.tsx'

@@ -1,3 +1,4 @@
+// Displays read-only Microsoft Graph email messages with pagination.
 import { useGraphPages } from '../hooks/useGraphPages.ts'
 import { dateTime, initials } from '../utils/data.ts'
 import { Badge } from '../components/Badge.tsx'

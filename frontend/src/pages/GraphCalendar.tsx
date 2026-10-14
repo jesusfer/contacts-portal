@@ -1,3 +1,4 @@
+// Displays Microsoft Graph calendar events with month navigation and paging.
 import { useState } from 'preact/hooks'
 import { useGraphPages } from '../hooks/useGraphPages.ts'
 import { dateTime } from '../utils/data.ts'

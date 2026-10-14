@@ -1,3 +1,4 @@
+// Renders a page title, optional eyebrow, subtitle, and actions.
 import type { ComponentChildren } from 'preact'
 
 interface PageHeadingProps {

@@ -1,3 +1,4 @@
+// Initializes authentication and renders the CRM or Graph Teams workspace.
 import { useEffect, useRef, useState } from 'preact/hooks'
 import * as TeamsSDK from '../teams.ts'
 import * as TeamsGraph from '../teams-graph.ts'

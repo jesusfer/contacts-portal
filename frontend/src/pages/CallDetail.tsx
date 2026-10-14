@@ -1,3 +1,4 @@
+// Displays and edits the details of a selected call.
 import { useEffect, useState } from 'preact/hooks'
 import { api, dateTime, time, useResource } from '../utils/data.ts'
 import { CallFields } from '../components/CallFields.tsx'

@@ -1,3 +1,4 @@
+// Loads global styles and mounts the Preact application at the root element.
 import { render } from 'preact'
 import './index.css'
 import { App } from './App.tsx'

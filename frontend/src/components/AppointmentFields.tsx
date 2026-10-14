@@ -1,3 +1,4 @@
+// Provides editable start, end, and notes fields for an appointment.
 export function AppointmentFields({ starts, setStarts, ends, setEnds, notes, setNotes }) {
   return (
     <>

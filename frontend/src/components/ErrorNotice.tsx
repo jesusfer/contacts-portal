@@ -1,3 +1,4 @@
+// Displays an error message with an optional retry action.
 interface ErrorNoticeProps {
   error?: string | null
   retry?: () => void

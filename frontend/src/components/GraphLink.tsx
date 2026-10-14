@@ -1,3 +1,4 @@
+// Renders a validated external Microsoft Graph link.
 import { safeExternalUrl } from '../utils/data.ts'
 import type { ComponentChildren } from 'preact'
 
