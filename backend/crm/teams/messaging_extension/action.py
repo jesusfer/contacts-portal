@@ -3,10 +3,26 @@
 import html
 import re
 
-from botbuilder.schema import InvokeResponse
 from django.utils.html import strip_tags
+from microsoft_teams.api import (
+    Attachment,
+    CardTaskModuleTaskInfo,
+    InvokeResponse,
+    MessagingExtensionActionResponse,
+    TaskModuleContinueResponse,
+    TaskModuleMessageResponse,
+)
+from microsoft_teams.cards import (
+    AdaptiveCard,
+    Choice,
+    ChoiceSetInput,
+    SubmitAction,
+    TextBlock,
+    TextInput,
+)
 
 from ...models import Call, Contact
+from .search import serialize_card
 
 
 ACTION_COMMAND_ID = "logCallSummary"
@@ -30,48 +46,44 @@ def message_text(payload):
 def task_response(card=None, title="Log call summary", message=None):
     """Build a Teams task-module response with a card, or a final message."""
     if message is not None:
-        task = {"type": "message", "value": message}
+        task = TaskModuleMessageResponse(value=message)
     else:
-        task = {
-            "type": "continue",
-            "value": {
-                "title": title,
-                "width": "medium",
-                "height": "medium",
-                "card": {
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": card,
-                },
-            },
-        }
-    return InvokeResponse(status=200, body={"task": task})
+        task = TaskModuleContinueResponse(
+            value=CardTaskModuleTaskInfo(
+                title=title,
+                width="medium",
+                height="medium",
+                card=Attachment(
+                    content_type="application/vnd.microsoft.card.adaptive",
+                    content=serialize_card(card),
+                ),
+            )
+        )
+    return InvokeResponse[dict](
+        status=200,
+        body=MessagingExtensionActionResponse(task=task).model_dump(
+            mode="json", by_alias=True, exclude_none=True
+        ),
+    )
 
 
 def _choice_step(step, intro, input_id, label, choices, data, extra=()):
-    submit = {
-        "type": "Action.Submit",
-        "title": "Next",
-        "data": {**data, "step": step},
-    }
-    return {
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "type": "AdaptiveCard",
-        "version": "1.3",
-        "body": [
-            {"type": "TextBlock", "text": intro, "wrap": True},
-            {
-                "type": "Input.ChoiceSet",
-                "id": input_id,
-                "label": label,
-                "style": "compact",
-                "isRequired": True,
-                "errorMessage": "Select an option.",
-                "choices": choices,
-            },
+    return AdaptiveCard(
+        version="1.3",
+        body=[
+            TextBlock(text=intro, wrap=True),
+            ChoiceSetInput(
+                id=input_id,
+                label=label,
+                style="compact",
+                is_required=True,
+                error_message="Select an option.",
+                choices=choices,
+            ),
             *extra,
         ],
-        "actions": [submit],
-    }
+        actions=[SubmitAction(title="Next", data={**data, "step": step})],
+    )
 
 
 def customer_step(agent, message):
@@ -85,7 +97,7 @@ def customer_step(agent, message):
             "Select the customer for this call.",
             "customer_id",
             "Customer",
-            [{"title": c.name[:100], "value": str(c.pk)} for c in companies],
+            [Choice(title=c.name[:100], value=str(c.pk)) for c in companies],
             {"message": message},
         )
     )
@@ -103,7 +115,7 @@ def contact_step(company, message):
             "contact_id",
             "Contact",
             [
-                {"title": f"{c.name} ({c.email})"[:100], "value": str(c.pk)}
+                Choice(title=f"{c.name} ({c.email})"[:100], value=str(c.pk))
                 for c in contacts
             ],
             {"message": message},
@@ -123,7 +135,7 @@ def call_step(agent, contact, message):
             "call_id",
             "Call",
             [
-                {"title": f"#{c.pk} — {c.get_status_display()}", "value": str(c.pk)}
+                Choice(title=f"#{c.pk} — {c.get_status_display()}", value=str(c.pk))
                 for c in calls
             ],
             {"contact_id": str(contact.pk), "message": message},
@@ -137,39 +149,31 @@ def summary_step(call, message):
     if message:
         summary = f"{summary.rstrip()}\n\n{message}" if summary.strip() else message
     return task_response(
-        {
-            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-            "type": "AdaptiveCard",
-            "version": "1.3",
-            "body": [
-                {
-                    "type": "TextBlock",
-                    "text": f"Edit the summary for call #{call.pk}.",
-                    "wrap": True,
-                },
-                {
-                    "type": "Input.Text",
-                    "id": "summary",
-                    "label": "Summary",
-                    "isMultiline": True,
-                    "isRequired": True,
-                    "errorMessage": "Enter a summary.",
-                    "maxLength": SUMMARY_LIMIT,
-                    "value": summary,
-                },
+        AdaptiveCard(
+            version="1.3",
+            body=[
+                TextBlock(text=f"Edit the summary for call #{call.pk}.", wrap=True),
+                TextInput(
+                    id="summary",
+                    label="Summary",
+                    is_multiline=True,
+                    is_required=True,
+                    error_message="Enter a summary.",
+                    max_length=SUMMARY_LIMIT,
+                    value=summary,
+                ),
             ],
-            "actions": [
-                {
-                    "type": "Action.Submit",
-                    "title": "Save summary",
-                    "data": {
+            actions=[
+                SubmitAction(
+                    title="Save summary",
+                    data={
                         "step": "summary",
                         "contact_id": str(call.contact_id),
                         "call_id": str(call.pk),
                     },
-                }
+                )
             ],
-        }
+        )
     )
 
 

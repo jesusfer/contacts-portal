@@ -1,12 +1,24 @@
 """Delegated, read-only Microsoft Graph requests."""
 
 from datetime import datetime, timezone
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import httpx
 import requests
+from asgiref.sync import async_to_sync
+from azure.core.exceptions import ClientAuthenticationError
 from django.core import signing
 from django.utils.html import strip_tags
+from kiota_abstractions.base_request_configuration import RequestConfiguration
+from kiota_abstractions.response_handler import ResponseHandler
+from kiota_authentication_azure.azure_identity_authentication_provider import (
+    AzureIdentityAuthenticationProvider,
+)
+from kiota_http.middleware.options import ResponseHandlerOption
+from microsoft_teams.graph import AuthProvider
+from msgraph import GraphServiceClient
+from msgraph.graph_request_adapter import GraphRequestAdapter
 
 from .external_calls import logged_request
 
@@ -25,6 +37,50 @@ class InvalidCursor(ValueError):
     pass
 
 
+class _GraphTransport(httpx.AsyncBaseTransport):
+    """Keep SDK calls on the portal's bounded, metadata-only requests transport."""
+
+    async def handle_async_request(self, request):
+        url = urlsplit(str(request.url))
+        if (
+            request.method != "GET"
+            or url.scheme != "https"
+            or url.netloc != "graph.microsoft.com"
+            or url.path not in {
+                "/v1.0/me",
+                "/v1.0/me/photo/$value",
+                "/v1.0/me/calendarView",
+                "/v1.0/me/mailFolders/inbox/messages",
+                "/v1.0/me/presence",
+            }
+            or url.fragment
+        ):
+            raise GraphClientError("Unsupported Graph request.")
+        endpoint = url.path.removeprefix("/v1.0")
+        response = logged_request(
+            requests.get,
+            f"https://graph.microsoft.com{url.path}",
+            service="graph",
+            operation=endpoint,
+            method="GET",
+            headers=requests.structures.CaseInsensitiveDict(request.headers),
+            params=dict(parse_qsl(url.query)) or None,
+            timeout=10,
+            allow_redirects=False,
+        )
+        return httpx.Response(
+            response.status_code,
+            request=request,
+            extensions={"portal_response": response},
+        )
+
+
+class _GraphResponseHandler(ResponseHandler):
+    async def handle_response_async(self, response, error_map):
+        # Preserve strict JSON validation and the existing public error contract.
+        return response.extensions["portal_response"]
+
+
 class GraphClient:
     GRAPH_BASE = "https://graph.microsoft.com/v1.0"
     CURSOR_SALT = "crm.graph.pagination.v1"
@@ -37,34 +93,48 @@ class GraphClient:
         self.user_id = user_id
         self.provider_id = provider_id
 
-    def _request(self, endpoint, params=None):
-        """Make a read-only Graph request and translate transport or authorization errors."""
-        try:
-            response = logged_request(
-                requests.get,
-                f"{self.GRAPH_BASE}{endpoint}",
-                service="graph",
-                operation=endpoint
-                if endpoint
-                in {
-                    "/me",
-                    "/me/calendarView",
-                    "/me/mailFolders/inbox/messages",
-                    "/me/presence",
-                }
-                else "http_request",
-                method="GET",
-                headers={
-                    "Authorization": "Bearer " + self.access_token,
-                    "Accept": "application/json",
-                    "Prefer": 'outlook.timezone="UTC", outlook.body-content-type="text"',
-                },
-                params=params,
-                timeout=10,
-                allow_redirects=False,
+    async def _sdk_request(self, endpoint, params):
+        async with httpx.AsyncClient(
+            transport=_GraphTransport(), timeout=10, follow_redirects=False
+        ) as transport:
+            adapter = GraphRequestAdapter(
+                AzureIdentityAuthenticationProvider(AuthProvider(self.access_token)),
+                client=transport,
             )
+            graph = GraphServiceClient(request_adapter=adapter)
+            builders = {
+                "/me": graph.me,
+                "/me/photo/$value": graph.me.photo.content,
+                "/me/calendarView": graph.me.calendar_view,
+                "/me/mailFolders/inbox/messages": graph.me.mail_folders.by_mail_folder_id(
+                    "inbox"
+                ).messages,
+                "/me/presence": graph.me.presence,
+            }
+            if endpoint not in builders:
+                raise GraphClientError("Unsupported Graph request.")
+            # with_url supports opaque skip tokens after our cursor validation.
+            url = f"{self.GRAPH_BASE}{endpoint}"
+            if params:
+                url += "?" + urlencode(params)
+            configuration = RequestConfiguration(
+                options=[ResponseHandlerOption(_GraphResponseHandler())]
+            )
+            configuration.headers.add(
+                "Prefer", 'outlook.timezone="UTC", outlook.body-content-type="text"'
+            )
+            return await builders[endpoint].with_url(url).get(configuration)
+
+    def _request(self, endpoint, params=None, *, photo=False):
+        """Use Graph SDK operations with the existing transport and error policy."""
+        try:
+            response = async_to_sync(self._sdk_request)(endpoint, params)
+        except ClientAuthenticationError as exc:
+            raise TokenExpiredError("Graph authorization required. Sign in again.") from exc
         except requests.RequestException as exc:
             raise GraphClientError("Graph service unavailable.") from exc
+        if photo and response.status_code == 404:
+            return response
         if response.status_code in (401, 403):
             raise TokenExpiredError("Graph access denied. Sign in again.")
         if not 200 <= response.status_code < 300:
@@ -97,19 +167,7 @@ class GraphClient:
 
     def get_photo(self):
         """Fetch the delegated user's profile photo, returning ``None`` when absent."""
-        try:
-            response = logged_request(
-                requests.get,
-                f"{self.GRAPH_BASE}/me/photo/$value",
-                service="graph",
-                operation="/me/photo/$value",
-                method="GET",
-                headers={"Authorization": "Bearer " + self.access_token},
-                timeout=10,
-                allow_redirects=False,
-            )
-        except requests.RequestException as exc:
-            raise GraphClientError("Graph photo unavailable.") from exc
+        response = self._request("/me/photo/$value", photo=True)
         if response.status_code == 404:
             return None
         if response.status_code in (401, 403):

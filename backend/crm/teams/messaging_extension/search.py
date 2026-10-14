@@ -3,14 +3,17 @@
 import json
 
 from asgiref.sync import sync_to_async
-from botbuilder.core import CardFactory
-from botbuilder.schema import CardAction, HeroCard, InvokeResponse
-from botbuilder.schema.teams import (
+from django.db.models import Count, Prefetch
+from microsoft_teams.api import (
+    Attachment,
+    CardAction,
+    HeroCard,
+    InvokeResponse,
     MessagingExtensionAttachment,
     MessagingExtensionResponse,
     MessagingExtensionResult,
 )
-from django.db.models import Count, Prefetch
+from microsoft_teams.cards import AdaptiveCard, Fact, FactSet, TextBlock
 
 from ...models import Company, Contact
 from .text import plain_text
@@ -22,58 +25,60 @@ PAGE_SIZE = 25
 CARD_BYTE_LIMIT = 16000
 
 
+class SelectionAction(CardAction):
+    """A hero-card tap does not need the SDK's required button title."""
+
+    title: str | None = None
+
+
+def serialize_card(card):
+    """Serialize SDK cards with the Adaptive Cards schema's wire-format key."""
+    payload = card.model_dump(mode="json", by_alias=True, exclude_none=True)
+    # Teams SDK 2.1 serializes ac_schema as "schema", not "$schema".
+    payload.pop("schema", None)
+    payload["$schema"] = "http://adaptivecards.io/schemas/adaptive-card.json"
+    return payload
+
+
 def customer_card(company):
     """Build an Adaptive Card with a customer's details and bounded contact list."""
     body = [
-        {
-            "type": "TextBlock",
-            "text": plain_text(company.name),
-            "weight": "Bolder",
-            "size": "Large",
-            "wrap": True,
-        },
-        {
-            "type": "FactSet",
-            "facts": [
-                {"title": "Customer ID", "value": str(company.pk)},
-                {"title": "Contacts", "value": str(company.contact_count)},
+        TextBlock(
+            text=plain_text(company.name), weight="Bolder", size="Large", wrap=True
+        ),
+        FactSet(
+            facts=[
+                Fact(title="Customer ID", value=str(company.pk)),
+                Fact(title="Contacts", value=str(company.contact_count)),
             ],
-        },
+        ),
     ]
-    card = {
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "type": "AdaptiveCard",
-        "version": "1.3",
-        "body": body,
-    }
+    card = AdaptiveCard(version="1.3", body=body)
+    body = card.body
     shown = 0
     for contact in company.card_contacts:
-        block = {
-            "type": "TextBlock",
-            "text": f"{plain_text(contact.name)}\n\n{plain_text(contact.email)}",
-            "wrap": True,
-            "separator": True,
-        }
+        block = TextBlock(
+            text=f"{plain_text(contact.name)}\n\n{plain_text(contact.email)}",
+            wrap=True,
+            separator=True,
+        )
         body.append(block)
-        if len(json.dumps(card).encode("utf-8")) > CARD_BYTE_LIMIT - 1024:
+        if len(json.dumps(serialize_card(card)).encode("utf-8")) > CARD_BYTE_LIMIT - 1024:
             body.pop()
             break
         shown += 1
     if not company.contact_count:
-        body.append(
-            {"type": "TextBlock", "text": "No contacts recorded.", "wrap": True}
-        )
+        body.append(TextBlock(text="No contacts recorded.", wrap=True))
     elif shown < company.contact_count:
         body.append(
-            {
-                "type": "TextBlock",
-                "text": (
+            TextBlock(
+                text=(
                     f"Showing {shown} of {company.contact_count} contacts. Open the portal for the full directory."
                 ),
-                "wrap": True,
-            }
+                wrap=True,
+            ),
         )
-    return card
+    return serialize_card(card)
 
 
 def search_customers(agent, text, skip, count):
@@ -110,7 +115,10 @@ def result_response(attachments):
             attachments=attachments,
         )
     )
-    return InvokeResponse(status=200, body=response.serialize())
+    return InvokeResponse[dict](
+        status=200,
+        body=response.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
 
 
 async def handle_search(agent, activity):
@@ -123,12 +131,11 @@ async def handle_search(agent, activity):
         company = await sync_to_async(selected_customer)(agent, pk)
         if not company:
             return InvokeResponse(status=404)
-        card = CardFactory.adaptive_card(customer_card(company))
         return result_response(
             [
                 MessagingExtensionAttachment(
-                    content_type=card.content_type,
-                    content=card.content,
+                    content_type="application/vnd.microsoft.card.adaptive",
+                    content=customer_card(company),
                 )
             ]
         )
@@ -166,13 +173,14 @@ async def handle_search(agent, activity):
     )
     attachments = []
     for company in companies:
-        preview = CardFactory.hero_card(
-            HeroCard(
+        preview = Attachment(
+            content_type="application/vnd.microsoft.card.hero",
+            content=HeroCard(
                 title=plain_text(
                     company.name[:80] + ("…" if len(company.name) > 80 else "")
                 ),
                 subtitle=f"{company.contact_count} contacts",
-                tap=CardAction(type="invoke", value={"customer_id": company.pk}),
+                tap=SelectionAction(type="invoke", value={"customer_id": company.pk}),
             )
         )
         attachments.append(
