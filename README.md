@@ -158,8 +158,8 @@ not actual received or sent emails.
 Teams tabs default to a Graph-only SPA with automatic Teams SSO and direct SDK
 Graph reads. **Open full dashboard** explicitly uses the existing server-side
 OBO flow. Set `TEAMS_GRAPH_ONLY=0` (default: `1`) to retain automatic OBO/dashboard
-startup. See [Teams integration](teams.md) for both authentication diagrams,
-Entra setup, and deployment requirements.
+startup. See the [Teams guides](docs/README.md) for tab behavior, authentication,
+messaging extensions, and deployment requirements.
 
 Local authentication uses Django usernames/passwords; public password signup
 is disabled. Login throttling uses Django's default process-local cache, so its
@@ -356,9 +356,10 @@ sending a result shows only the requesting agent's latest three records.
 
 ## User profiles
 
-For Microsoft Teams static/configurable tabs, automatic SSO, and delegated
-Microsoft Graph calendar, inbox, profile, and presence integration, see
-[teams.md](teams.md). Providers whose configured ID starts with `entraid`
+For Microsoft Teams tabs, automatic SSO, and delegated Microsoft Graph calendar,
+inbox, profile, and presence integration, see the
+[Teams tab guide](docs/teams-tabs.md) and
+[Teams authentication guide](docs/teams-authentication.md). Providers whose configured ID starts with `entraid`
 use Graph-backed, read-only profile/calendar/inbox views; the local behavior
 below applies to other logins.
 
