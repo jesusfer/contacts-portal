@@ -2,8 +2,9 @@ from django.contrib import admin
 from django.urls import include, path, re_path
 
 from crm import views
-from crm.api_messaging_extension import search_contacts
-from crm.messaging_extension import messages
+from crm.teams.messaging_extension.api import search_contacts
+from crm.teams.messaging_extension.bot import messages
+from crm.teams import views as teams_views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -29,11 +30,11 @@ urlpatterns = [
     path("api/graph/inbox/", views.graph_inbox),
     path("api/graph/presence/", views.graph_presence),
     # Teams configuration and SSO
-    path("api/teams/config/", views.teams_config),
-    path("api/teams/sso/", views.teams_sso),
-    path("api/teams/identity/", views.teams_identity),
-    path("api/teams/customers/", views.teams_customers),
-    path("api/teams/customers/<int:pk>/", views.teams_customer),
+    path("api/teams/config/", teams_views.teams_config),
+    path("api/teams/sso/", teams_views.teams_sso),
+    path("api/teams/identity/", teams_views.teams_identity),
+    path("api/teams/customers/", teams_views.teams_customers),
+    path("api/teams/customers/<int:pk>/", teams_views.teams_customer),
     path("api/teams/messages/", messages),
     path("api/teams/contact-search/", search_contacts),
     re_path(r"^(?:api|accounts|admin|static|media)(?:/|$)", views.not_found),

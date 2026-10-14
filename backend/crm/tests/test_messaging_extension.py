@@ -14,7 +14,7 @@ from botbuilder.schema import ResourceResponse
 from botframework.connector.auth import AuthenticationConstants
 from PIL import Image
 
-from ..messaging_extension import CARD_BYTE_LIMIT, COMMAND_ID, CONTACT_LIMIT, PAGE_SIZE
+from ..teams.messaging_extension.search import CARD_BYTE_LIMIT, COMMAND_ID, CONTACT_LIMIT, PAGE_SIZE
 from ..models import Agent, Call, Company, Contact
 
 
@@ -283,7 +283,7 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(self.post(self.activity(channelId="emulator")).status_code, 400)
         self.assertEqual(self.post(self.activity(name="composeExtension/anonymousQueryLink")).status_code, 501)
 
-    @patch("crm.messaging_extension.TeamsChannelAdapter.send_activities", new_callable=AsyncMock)
+    @patch("crm.teams.messaging_extension.bot.TeamsChannelAdapter.send_activities", new_callable=AsyncMock)
     def test_message_receives_conversation_disabled_reply(self, send):
         send.return_value = [ResourceResponse(id="reply")]
         for text in ("Hello", None):
@@ -305,7 +305,7 @@ class MessagingExtensionTests(TestCase):
                 self.assertEqual(reply.reply_to_id, "incoming-message")
                 send.reset_mock()
 
-    @patch("crm.messaging_extension.TeamsChannelAdapter.send_activities", new_callable=AsyncMock)
+    @patch("crm.teams.messaging_extension.bot.TeamsChannelAdapter.send_activities", new_callable=AsyncMock)
     def test_message_notice_does_not_require_crm_provisioning(self, send):
         send.return_value = [ResourceResponse(id="reply")]
         self.account.delete()
@@ -314,7 +314,7 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         send.assert_awaited_once()
 
-    @patch("crm.messaging_extension.TeamsChannelAdapter.send_activities", new_callable=AsyncMock)
+    @patch("crm.teams.messaging_extension.bot.TeamsChannelAdapter.send_activities", new_callable=AsyncMock)
     def test_messages_still_require_channel_authentication_and_validation(self, send):
         activity = self.activity(type="message", value=None, text="Hello")
         for token in ("not-a-jwt", self.token(aud="another-app"),

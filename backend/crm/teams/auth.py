@@ -11,8 +11,8 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from .external_calls import logged_request
-from .graph import GraphClient, GraphClientError, TokenExpiredError
+from ..external_calls import logged_request
+from ..graph import GraphClient, GraphClientError, TokenExpiredError
 
 
 class TeamsConfigError(ValueError):

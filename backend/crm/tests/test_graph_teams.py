@@ -26,7 +26,7 @@ from ..graph import GraphClient, GraphClientError, InvalidCursor, TokenExpiredEr
 from ..signals import AUTH_SOURCE_SESSION_KEY
 from ..models import UserProfile
 from ..openid_connect import TenantAwareOpenIDConnectOAuth2Adapter
-from ..teams import GraphTokenManager, TeamsTokenError, validate_teams_token
+from ..teams.auth import GraphTokenManager, TeamsTokenError, validate_teams_token
 
 
 class TeamsGraphFrontendTests(SimpleTestCase):
@@ -275,7 +275,7 @@ class SignedTokenMixin:
         )
 
     def validate(self, claims):
-        with patch("crm.teams._get_jwks", return_value=self.jwks):
+        with patch("crm.teams.auth._get_jwks", return_value=self.jwks):
             return validate_teams_token(self.token(claims), CONFIG)
 
 
@@ -293,13 +293,13 @@ class TeamsJWTTests(SignedTokenMixin, SimpleTestCase):
 
     def test_invalid_signature(self):
         wrong_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        with patch("crm.teams._get_jwks", return_value=self.jwks), self.assertRaises(TeamsTokenError):
+        with patch("crm.teams.auth._get_jwks", return_value=self.jwks), self.assertRaises(TeamsTokenError):
             validate_teams_token(self.token(key=wrong_key), CONFIG)
 
     def test_algorithm_confusion_rejected(self):
         token = jwt.encode(self.claims(), "a-long-test-signing-key-not-rsa-123", algorithm="HS256",
                            headers={"kid": "test-key"})
-        with patch("crm.teams._get_jwks") as keys, self.assertRaises(TeamsTokenError):
+        with patch("crm.teams.auth._get_jwks") as keys, self.assertRaises(TeamsTokenError):
             validate_teams_token(token, CONFIG)
         keys.assert_not_called()
 
@@ -327,7 +327,7 @@ class TeamsJWTTests(SignedTokenMixin, SimpleTestCase):
         self.validate({**self.claims(), "scp": "other access_as_user another"})
 
     def test_unknown_key_refreshes_once(self):
-        with patch("crm.teams._get_jwks", side_effect=[{"keys": []}, self.jwks]) as keys:
+        with patch("crm.teams.auth._get_jwks", side_effect=[{"keys": []}, self.jwks]) as keys:
             validate_teams_token(self.token(), CONFIG)
         self.assertEqual(keys.call_count, 2)
 
@@ -337,7 +337,7 @@ class TeamsJWTTests(SignedTokenMixin, SimpleTestCase):
             **self.claims(), "tid": other_tenant,
             "iss": f"https://login.microsoftonline.com/{other_tenant}/v2.0",
         }
-        with patch("crm.teams._get_jwks", return_value=self.jwks) as keys:
+        with patch("crm.teams.auth._get_jwks", return_value=self.jwks) as keys:
             result = validate_teams_token(self.token(claims), {**CONFIG, "tenant_id": "organizations"})
         self.assertEqual(result["tid"], other_tenant)
         keys.assert_called_once_with(other_tenant, reload=False)
@@ -346,7 +346,7 @@ class TeamsJWTTests(SignedTokenMixin, SimpleTestCase):
         with self.assertRaises(TeamsTokenError):
             self.validate({**self.claims(), "tid": "organizations"})
 
-    @patch("crm.teams.requests.get")
+    @patch("crm.teams.auth.requests.get")
     def test_jwks_fixed_tenant_endpoint_does_not_follow_redirect(self, get):
         cache.clear()
         get.return_value = response(status=302)
@@ -796,7 +796,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         }).status_code, 400)
         get.assert_not_called()
 
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth.requests.post")
     @patch("crm.graph.requests.get")
     def test_refresh_rotates_session_credentials_and_checks_identity(self, get, post):
         self.graph_login(expires_in=-1)
@@ -819,7 +819,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.client.get("/api/graph/profile/")
         post.assert_called_once()
 
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth.requests.post")
     @patch("crm.graph.requests.get")
     def test_refresh_preserves_old_refresh_token_when_not_rotated(self, get, post):
         self.graph_login(expires_in=-1)
@@ -830,7 +830,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 200)
         self.assertEqual(self.client.session["graph_tokens"]["entraid-work"]["refresh_token"], "session-refresh")
 
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth.requests.post")
     def test_expired_without_refresh_and_tenant_mismatch_never_exchange(self, post):
         self.graph_login(expires_in=-1, refresh_token="")
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
@@ -845,7 +845,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             "first_name": "Overwrite",
         }, content_type="application/json").status_code, 403)
 
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth.requests.post")
     @patch("crm.graph.requests.get")
     def test_refresh_failure_redirect_or_mismatch_does_not_expose_credentials(self, get, post):
         for status, expected in ((400, 403), (302, 502), (500, 502)):
@@ -863,8 +863,8 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
         self.assertNotIn("graph_tokens", self.client.session)
 
-    @patch("crm.teams._get_jwks")
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.auth.requests.post")
     @patch("crm.graph.requests.get")
     def test_sso_second_account_nested_identity_different_sub_and_obo(self, get, post, keys):
         keys.return_value = self.jwks
@@ -895,8 +895,8 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             "id_token": {"oid": OID, "tid": TENANT, "sub": "oidc-sub"},
         })
 
-    @patch("crm.teams._get_jwks")
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.auth.requests.post")
     def test_sso_inactive_unlinked_and_same_email_do_not_authenticate(self, post, keys):
         keys.return_value = self.jwks
         self.user.is_active = False
@@ -910,8 +910,8 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         post.assert_not_called()
         self.assertNotIn("_auth_user_id", self.client.session)
 
-    @patch("crm.teams._get_jwks")
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.auth.requests.post")
     @patch("crm.graph.requests.get")
     def test_sso_obo_graph_identity_mismatch_does_not_login(self, get, post, keys):
         keys.return_value = self.jwks
@@ -923,8 +923,8 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertNotIn("_auth_user_id", self.client.session)
         self.assertNotIn("graph_tokens", self.client.session)
 
-    @patch("crm.teams._get_jwks")
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.auth.requests.post")
     def test_sso_obo_errors_are_403_or_502_without_remote_token_text(self, post, keys):
         keys.return_value = self.jwks
         for status, expected in ((400, 403), (302, 502), (500, 502)):
@@ -935,8 +935,8 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 self.assertNotIn("secret-value", str(result.json()))
                 self.assertNotIn("_auth_user_id", self.client.session)
 
-    @patch("crm.teams._get_jwks")
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.auth.requests.post")
     def test_sso_malformed_obo_token_responses_never_login(self, post, keys):
         keys.return_value = self.jwks
         good = {"access_token": "obo-access", "token_type": "Bearer", "expires_in": 3600}
@@ -951,8 +951,8 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 self.assertEqual(self.sso().status_code, 502)
                 self.assertNotIn("_auth_user_id", self.client.session)
 
-    @patch("crm.teams._get_jwks")
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.auth.requests.post")
     def test_duplicate_linked_identity_is_rejected_without_obo(self, post, keys):
         keys.return_value = self.jwks
         SocialAccount.objects.create(
@@ -976,9 +976,9 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def test_teams_config_can_select_legacy_startup(self):
         self.assertFalse(self.client.get("/api/teams/config/").json()["graph_only"])
 
-    @patch("crm.teams._get_jwks")
-    @patch("crm.views.exchange_graph_token")
-    @patch("crm.views.GraphClient")
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.views.exchange_graph_token")
+    @patch("crm.teams.views.GraphClient")
     def test_identity_verification_needs_no_portal_account_or_obo(self, graph, exchange, keys):
         keys.return_value = self.jwks
         SocialAccount.objects.all().delete()
@@ -995,7 +995,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             self.assertNotIn(key, self.client.session)
         self.assertEqual(self.client.get("/api/contacts/").status_code, 401)
 
-    @patch("crm.teams._get_jwks")
+    @patch("crm.teams.auth._get_jwks")
     def test_identity_verification_preserves_existing_browser_session(self, keys):
         keys.return_value = self.jwks
         self.graph_login()
@@ -1007,7 +1007,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(dict(self.client.session), before)
 
-    @patch("crm.teams._get_jwks")
+    @patch("crm.teams.auth._get_jwks")
     def test_identity_verification_requires_csrf_and_valid_claims(self, keys):
         keys.return_value = self.jwks
         client = Client(enforce_csrf_checks=True)
@@ -1030,8 +1030,8 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 self.assertEqual(result.status_code, 403)
                 self.assertIn("no-store", result["Cache-Control"])
 
-    @patch("crm.views.ratelimit.consume", return_value=False)
-    @patch("crm.teams._get_jwks")
+    @patch("crm.teams.views.ratelimit.consume", return_value=False)
+    @patch("crm.teams.auth._get_jwks")
     def test_identity_verification_is_rate_limited(self, keys, consume):
         result = self.client.post(
             "/api/teams/identity/", {"provider_id": "entraid-work", "token": self.token()},
@@ -1040,7 +1040,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(result.status_code, 429)
         keys.assert_not_called()
 
-    @patch("crm.teams._get_jwks")
+    @patch("crm.teams.auth._get_jwks")
     def test_identity_verification_binds_multitenant_issuer_to_signed_tenant(self, keys):
         keys.return_value = self.jwks
         providers = configure_oidc(json.dumps([{
@@ -1057,8 +1057,8 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json(), {"id": OID, "tenant_id": TENANT})
 
-    @patch("crm.teams._get_jwks")
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.auth.requests.post")
     @patch("crm.graph.requests.get")
     def test_fresh_teams_config_cookie_supports_csrf_protected_sso(self, get, post, keys):
         keys.return_value = self.jwks
@@ -1080,8 +1080,8 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.assertEqual(result.json()["user"]["id"], self.user.pk)
         self.assertEqual(result.json()["teams_identity"], {"id": OID, "tenant_id": TENANT})
 
-    @patch("crm.teams._get_jwks")
-    @patch("crm.teams.requests.post")
+    @patch("crm.teams.auth._get_jwks")
+    @patch("crm.teams.auth.requests.post")
     def test_sso_rejects_short_or_oversized_input_before_token_verification(self, post, keys):
         for token in ("", "x" * 255, "x" * 16385, "x" * 32769):
             with self.subTest(length=len(token)):
@@ -1093,7 +1093,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         keys.assert_not_called()
         post.assert_not_called()
 
-    @patch("crm.teams._get_jwks")
+    @patch("crm.teams.auth._get_jwks")
     def test_identity_rejects_short_or_oversized_input_and_unknown_provider(self, keys):
         for token in ("", "x" * 255, "x" * 16385, "x" * 32769):
             result = self.client.post(

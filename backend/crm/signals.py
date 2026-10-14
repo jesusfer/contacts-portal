@@ -2,7 +2,7 @@ from allauth.account.signals import user_logged_in as allauth_user_logged_in
 from django.contrib.auth.signals import user_logged_in, user_logged_out
 from django.dispatch import receiver
 
-from .teams import GraphTokenManager, account_identity, graph_provider, provider_tenant
+from .teams.auth import GraphTokenManager, account_identity, graph_provider, provider_tenant
 
 
 AUTH_SOURCE_SESSION_KEY = "crm_auth_source"
