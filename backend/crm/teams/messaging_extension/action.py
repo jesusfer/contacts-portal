@@ -191,7 +191,9 @@ def handle_action(agent, name, value):
     if not isinstance(data, dict):
         return InvokeResponse(status=400)
     message = data.get("message")
-    message = message[:SUMMARY_LIMIT] if isinstance(message, str) else ""
+    if not isinstance(message, str) or not message:
+        message = message_text(value.get("messagePayload"))
+    message = message[:SUMMARY_LIMIT]
     step = data.get("step")
     if step == "customer":
         company = agent.companies.filter(pk=_pk(data.get("customer_id"))).first()

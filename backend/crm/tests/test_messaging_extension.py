@@ -194,6 +194,7 @@ class MessagingExtensionTests(TestCase):
         )
         card = response.json()["task"]["value"]["card"]["content"]
         data = card["actions"][0]["data"]
+        self.assertEqual(data["message"], "Hello & bye")
         self.assertEqual(card["body"][1]["choices"][0]["value"], str(self.contact.pk))
         response = self.action(
             "composeExtension/submitAction",
@@ -202,6 +203,7 @@ class MessagingExtensionTests(TestCase):
         card = response.json()["task"]["value"]["card"]["content"]
         self.assertEqual(card["actions"][0]["title"], "Next")
         data = card["actions"][0]["data"]
+        self.assertEqual(data["message"], "Hello & bye")
         response = self.action(
             "composeExtension/submitAction",
             data={**data, "call_id": str(call.pk)},
@@ -219,6 +221,83 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(response.json()["task"]["type"], "message")
         call.refresh_from_db()
         self.assertEqual(call.summary, "Private call\n\nDone")
+
+    def test_action_command_recovers_message_context_at_each_selection_step(self):
+        self.agent.companies.add(self.company)
+        call = self.agent.calls.get()
+        for message_data in ({}, {"message": ""}, {"message": None}):
+            for step in ("customer", "contact", "call"):
+                with self.subTest(message_data=message_data, step=step):
+                    response = self.action(
+                        "composeExtension/submitAction",
+                        commandContext="message",
+                        messagePayload={
+                            "body": {
+                                "contentType": "html",
+                                "content": "<p>Source &amp; note</p>",
+                            }
+                        },
+                        data={
+                            **message_data,
+                            "step": step,
+                            "customer_id": str(self.company.pk),
+                            "contact_id": str(self.contact.pk),
+                            "call_id": str(call.pk),
+                        },
+                    )
+                    self.assertEqual(response.status_code, 200)
+                    card = response.json()["task"]["value"]["card"]["content"]
+                    if step == "call":
+                        self.assertEqual(
+                            card["body"][1]["value"], "Private call\n\nSource & note"
+                        )
+                        response = self.action(
+                            "composeExtension/submitAction",
+                            data={
+                                **card["actions"][0]["data"],
+                                "summary": card["body"][1]["value"],
+                            },
+                        )
+                        self.assertEqual(response.status_code, 200)
+                        call.refresh_from_db()
+                        self.assertEqual(call.summary, "Private call\n\nSource & note")
+                        call.summary = "Private call"
+                        call.save(update_fields=["summary"])
+                    else:
+                        self.assertEqual(
+                            card["actions"][0]["data"]["message"], "Source & note"
+                        )
+
+    def test_action_command_prefers_carried_message_over_submit_context(self):
+        self.agent.companies.add(self.company)
+        response = self.action(
+            "composeExtension/submitAction",
+            messagePayload={"body": {"contentType": "text", "content": "Other text"}},
+            data={
+                "step": "customer",
+                "customer_id": str(self.company.pk),
+                "message": "Original text",
+            },
+        )
+        card = response.json()["task"]["value"]["card"]["content"]
+        self.assertEqual(card["actions"][0]["data"]["message"], "Original text")
+
+    def test_action_command_bounds_recovered_message_and_handles_missing_context(self):
+        self.agent.companies.add(self.company)
+        for payload, expected in (
+            ({"body": {"contentType": "text", "content": "x" * 4001}}, "x" * 4000),
+            (None, ""),
+            ({"body": {"content": None}}, ""),
+        ):
+            with self.subTest(payload=payload):
+                response = self.action(
+                    "composeExtension/submitAction",
+                    messagePayload=payload,
+                    data={"step": "customer", "customer_id": str(self.company.pk)},
+                )
+                self.assertEqual(response.status_code, 200)
+                card = response.json()["task"]["value"]["card"]["content"]
+                self.assertEqual(card["actions"][0]["data"]["message"], expected)
 
     def test_action_command_edits_existing_summary(self):
         self.agent.companies.add(self.company)
