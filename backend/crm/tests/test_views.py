@@ -1045,16 +1045,64 @@ class OIDCPageStylingTests(TestCase):
 
     def test_connections_and_connect_confirmation_share_styled_layout(self):
         user = get_user_model().objects.create_user("connected-agent")
+        Agent.objects.create(user=user)
         SocialAccount.objects.create(user=user, provider="nublar", uid="linked-subject")
         self.client.force_login(user)
         response = self.client.get("/accounts/3rdparty/")
-        self.assert_styled(response)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "socialaccount/base_manage.html")
+        self.assertContains(response, '<aside class="connections-sidebar">')
+        self.assertContains(response, '<section class="auth-card">')
+        for route in ("dashboard", "calls", "calendar", "contacts", "inbox", "profile"):
+            self.assertContains(response, f'href="/#/{route}"')
+        self.assertContains(response, 'href="/accounts/3rdparty/" aria-current="page"')
+        self.assertContains(response, 'id="main-content" tabindex="-1"')
+        self.assertContains(response, "connected-agent")
+        self.assertNotContains(response, '<div class="auth-brand-copy">')
         self.assertTemplateUsed(response, "socialaccount/connections.html")
         self.assertContains(response, 'name="account"')
         self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertContains(response, "/accounts/oidc/nublar/login/?process=connect")
         response = self.client.get("/accounts/oidc/nublar/login/?process=connect")
         self.assert_styled(response)
         self.assertContains(response, "Connect Nublar")
+
+    def test_connections_empty_state_without_agent_keeps_workspace_navigation(self):
+        user = get_user_model().objects.create_user("waiting-agent")
+        self.client.force_login(user)
+        response = self.client.get("/accounts/3rdparty/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<aside class="connections-sidebar">')
+        self.assertContains(response, 'href="/#/access"')
+        self.assertContains(response, 'href="/#/profile"')
+        self.assertNotContains(response, 'href="/#/dashboard"')
+        self.assertContains(response, "You currently have no third-party accounts")
+        self.assertContains(response, "/accounts/oidc/nublar/login/?process=connect")
+
+    def test_connections_removal_preserves_form_validation_and_messages(self):
+        user = get_user_model().objects.create_user("connected-agent")
+        account = SocialAccount.objects.create(
+            user=user, provider="nublar", uid="linked-subject"
+        )
+        SocialAccount.objects.create(user=user, provider="nublar", uid="other-subject")
+        self.client.force_login(user)
+        response = self.client.post("/accounts/3rdparty/", {})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<aside class="connections-sidebar">')
+        self.assertContains(response, "This field is required.")
+        self.assertTrue(SocialAccount.objects.filter(pk=account.pk).exists())
+        response = self.client.post(
+            "/accounts/3rdparty/", {"account": account.pk}, follow=True
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(SocialAccount.objects.filter(pk=account.pk).exists())
+        self.assertContains(response, '<aside class="connections-sidebar">')
+        self.assertContains(response, 'role="status"')
+
+    def test_connections_requires_login(self):
+        response = self.client.get("/accounts/3rdparty/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response.url)
 
 
 class OIDCSettingsTests(TestCase):

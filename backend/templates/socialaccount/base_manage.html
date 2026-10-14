@@ -1,0 +1,89 @@
+{% extends "allauth/layouts/manage.html" %}
+{% load i18n %}
+
+{% block extra_head %}
+    {{ block.super }}
+    <style>
+        .connections-shell{display:grid;grid-template-columns:242px minmax(0,1fr);min-height:100vh}
+        .connections-sidebar{position:fixed;inset:0 auto 0 0;width:242px;overflow-y:auto;background:#172c26;color:#c5d1ca;padding:34px 21px;display:flex;flex-direction:column}
+        .connections-workspace{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:#77958a;margin:43px 14px 13px}
+        .connections-nav{display:flex;flex-direction:column;gap:6px}
+        .connections-nav a{display:flex;align-items:center;gap:13px;padding:12px 14px;border-radius:8px;color:inherit;text-decoration:none;font-size:13px}
+        .connections-nav a:hover{background:#213d32}
+        .connections-nav a[aria-current=page]{background:#d5edb7;color:#233b29;font-weight:650}
+        .connections-nav svg{width:18px;height:18px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+        .connections-sidebar-bottom{margin-top:auto;border-top:1px solid #355045;padding-top:22px}
+        .connections-user{display:block;color:#eef4ef;font-size:12px;overflow-wrap:anywhere}
+        .connections-signout{display:block;color:#c8d4ca;margin-top:14px;font-size:12px}
+        .connections-main{grid-column:2;min-width:0}
+        .connections-topbar{height:78px;background:#fff;border-bottom:1px solid #e7eae2;display:flex;align-items:center;padding:0 40px;color:#92998e;font-size:12px}
+        .connections-topbar strong{color:#53664f;font-weight:500;margin-left:10px}
+        .connections-content{padding:35px 40px 50px;max-width:1600px;margin:auto}
+        .connections-content .auth-card{max-width:860px;padding:28px;box-shadow:none}
+        .connections-content .auth-card h1{font-size:28px}
+        .connections-content .auth-card h2{margin-top:28px;padding-top:24px;border-top:1px solid #e4e8df}
+        .connections-content .auth-card form p{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid #e4e8df;border-radius:8px;overflow-wrap:anywhere}
+        .connections-content .auth-card input[type=radio]{width:18px;height:18px;flex-shrink:0;padding:0;accent-color:#274a37}
+        .connections-content .auth-card label{cursor:pointer;min-width:0}
+        .connections-content .auth-card ul{padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:10px}
+        .connections-content .auth-card li a{display:inline-flex;padding:10px 16px;border:1px solid #dce3d6;border-radius:8px;color:#42543b;text-decoration:none;font-weight:600}
+        .connections-content .auth-card li a:hover{background:#f2f5ee}
+        .connections-errors{padding:12px 15px;border:1px solid #e2c8be;border-radius:8px;background:#fff3ed;color:#8a3c2c}
+        .connections-skip{position:absolute;left:12px;top:-60px;padding:10px 16px;background:#fff;z-index:20}
+        .connections-skip:focus{top:12px}
+        @media(max-width:760px){
+            .connections-shell{grid-template-columns:1fr}
+            .connections-sidebar{position:static;width:auto;padding:25px}
+            .connections-workspace{margin:24px 14px 13px}
+            .connections-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+            .connections-sidebar-bottom{margin-top:24px}
+            .connections-main{grid-column:1}
+            .connections-topbar{height:64px;padding:0 20px}
+            .connections-content{padding:25px 20px}
+            .connections-content .auth-card{padding:27px 22px}
+        }
+    </style>
+{% endblock extra_head %}
+
+{% block body %}
+    <a class="connections-skip" href="#main-content">{% trans "Skip to content" %}</a>
+    <div class="connections-shell">
+        <aside class="connections-sidebar">
+            <a class="auth-brand" href="/"><span class="auth-brand-mark">g</span>gather<span style="color:#b8d99d">.</span></a>
+            <div class="connections-workspace">{% trans "Your workspace" %}</div>
+            <nav class="connections-nav" aria-label="{% trans 'Main navigation' %}">
+                {% if user.agent %}
+                    <a href="/#/dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>{% trans "Overview" %}</a>
+                    <a href="/#/calls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3H3v4c0 8 6 14 14 14h4v-4l-5-2-2 3c-4-1-7-4-8-8l3-2-3-5Z"/></svg>{% trans "Call log" %}</a>
+                    <a href="/#/calendar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-14 4h3m4 0h3"/></svg>{% trans "Calendar" %}</a>
+                    <a href="/#/contacts"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m1-16a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 5"/></svg>{% trans "Contacts" %}</a>
+                    <a href="/#/inbox"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/></svg>{% trans "Inbox" %}</a>
+                {% else %}
+                    <a href="/#/access"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>{% trans "Workspace access" %}</a>
+                {% endif %}
+                <a href="/#/profile"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>{% trans "My profile" %}</a>
+                <a href="{% url 'socialaccount_connections' %}" aria-current="page">{% trans "Identity connections" %}</a>
+            </nav>
+            <div class="connections-sidebar-bottom">
+                <strong class="connections-user">{{ user.get_full_name|default:user.get_username }}</strong>
+                <a class="connections-signout" href="{% url 'account_logout' %}">{% trans "Sign out" %}</a>
+            </div>
+        </aside>
+        <main class="connections-main" id="main-content" tabindex="-1">
+            <header class="connections-topbar">
+                {% trans "Workspace" %} &nbsp; / <strong>{% trans "Identity connections" %}</strong>
+            </header>
+            <div class="connections-content">
+                <section class="auth-card">
+                    {% for message in messages %}
+                        <div class="auth-messages" role="status">{{ message }}</div>
+                    {% endfor %}
+                    {% if form.errors %}
+                        <div class="connections-errors" role="alert">{{ form.errors }}</div>
+                    {% endif %}
+                    {% block content %}{% endblock content %}
+                </section>
+            </div>
+        </main>
+    </div>
+{% endblock body %}
