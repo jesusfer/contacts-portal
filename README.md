@@ -155,10 +155,10 @@ not actual received or sent emails.
 
 ## Authentication and OIDC
 
-Teams tabs default to a Graph-only SPA with automatic Teams SSO and direct SDK
-Graph reads. **Open full dashboard** explicitly uses the existing server-side
-OBO flow. Set `TEAMS_GRAPH_ONLY=0` (default: `1`) to retain automatic OBO/dashboard
-startup. See the [Teams guides](docs/README.md) for tab behavior, authentication,
+Teams tabs open a Graph-only SPA by default, with automatic Teams SSO and direct
+SDK Graph reads. **Open full dashboard** uses server-side OBO sign-in. Set
+`TEAMS_GRAPH_ONLY=0` (default: `1`) to start directly in the full dashboard.
+See the [Teams guides](docs/README.md) for tab behavior, authentication,
 messaging extensions, and deployment requirements.
 
 Local authentication uses Django usernames/passwords; public password signup
@@ -223,7 +223,7 @@ then send it. No calls, appointments, inbox records, or Graph tokens are shared.
    - `TEAMS_BOT_APP_PASSWORD`: its client-secret **value**, kept only in private
      environment configuration; never include it in the Teams app package.
    - `TEAMS_BOT_TENANT_ID`: the allowed Entra tenant UUID.
-   - `TEAMS_BOT_PROVIDER_ID`: an existing `entraid`-prefixed `OIDC_PROVIDERS`
+   - `TEAMS_BOT_PROVIDER_ID`: a configured `entraid`-prefixed `OIDC_PROVIDERS`
      provider ID whose issuer accepts that tenant.
 3. Each user must first sign in to the portal through that OIDC provider so
    their Entra object/tenant identity is linked to an active local account.
@@ -260,9 +260,11 @@ packaging; Teams does **not** substitute them automatically:
 | `<TEAMS_OIDC_PROVIDER_ID>` | The selected `entraid`-prefixed `OIDC_PROVIDERS` provider `id`, also matching `TEAMS_BOT_PROVIDER_ID` for this single-tenant app |
 
 For tab SSO, configure that OIDC provider's `teams` settings with `tenant_id`
-matching its issuer, `audience` equal to `<TEAMS_SSO_APP_ID>`, and `resource`
-exactly `api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>`. The manifest's
-`webApplicationInfo.id` and `.resource` must match those values.
+matching its issuer and `audience` equal to `<TEAMS_SSO_APP_ID>`. The tab-and-bot
+manifest uses `api://<PORTAL_HOST>/botid-<TEAMS_SSO_APP_ID>` as its resource; the
+Contact Cards manifest uses `api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>`. The Entra
+Application ID URI must match the resource in the manifest being packaged. Set
+the provider's `teams.resource` to the resource used by the Teams app.
 In the portal's Entra app registration, set the same Application ID URI under
 **Expose an API**, expose the delegated `access_as_user` scope, and authorize the
 Teams desktop/mobile client `1fec8e78-bce4-4aaf-ab1b-5451cc387264` and web client
@@ -270,7 +272,7 @@ Teams desktop/mobile client `1fec8e78-bce4-4aaf-ab1b-5451cc387264` and web clien
 (`api.requestedAccessTokenVersion: 2`) and grant the delegated Graph permissions
 used by the portal (`User.Read`, `Calendars.Read`, `Mail.Read`, `Presence.Read`).
 Retain the provider's browser OIDC callback and client-secret configuration.
-Use production HTTPS, secure cookies, and the portal's existing Teams settings.
+Use production HTTPS, secure cookies, and the portal's configured Teams settings.
 The SSO entry enables the tabs; bot invokes still use their separate Bot Framework
 channel authentication. After upload, verify the personal tab signs in and a
 customer tab can be configured in a team or group chat.
@@ -281,8 +283,9 @@ debug mode; the Bot Framework Emulator is deliberately not accepted.
 Search is case-insensitive, honors Teams' requested page size (up to 25), and
 accepts up to 200 characters. Search results are lightweight previews; selecting
 a customer fetches its current details. Cards show up to 20 contacts and are size-bounded for
-Teams; any omitted contacts are explicitly noted. Companies and contacts use
-the existing shared directory, not the agent's company memberships.
+Teams; any omitted contacts are explicitly noted. Customer search and
+call-summary choices use the signed-in agent's company memberships and their
+contacts.
 Sending a card shares its contents with everyone in that conversation,
 including external participants; only share customer data with authorized
 recipients. Cards are snapshots and do not update after portal edits.
@@ -305,7 +308,7 @@ not a bot. Search by customer company name, contact name, or email; combine word
 to narrow results (for example, a customer name and a contact name). Select a
 contact to insert an Adaptive Card into the compose box, then send it to the chat.
 Each card contains the contact name, email, customer, and your latest three call
-records, newest ID first (the existing CRM call ordering). Call status, appointment
+records, newest ID first. Call status, appointment
 time in UTC when available, rating when available, and summary are included.
 Scheduled calls remain call records; this is not a list of only completed calls.
 Contacts with fewer than three calls show all available records; contacts without
@@ -326,14 +329,14 @@ shortened to keep cards bounded.
 3. Customize `teams/api-manifest.json` and `teams/contact-search-openapi.json`.
    Replace `<PORTAL_HOST>` in both files with the public HTTPS hostname and
    `<TEAMS_SSO_APP_ID>` with the configured provider's client ID. Give
-   `<TEAMS_API_APP_ID>` a new stable Teams app UUID, different from the existing
-   bot/tab app ID. Set real developer, privacy, and terms URLs.
+   `<TEAMS_API_APP_ID>` a new stable Teams app UUID, different from the bot/tab
+   app ID. Set real developer, privacy, and terms URLs.
 4. Package the customized `api-manifest.json` **renamed to `manifest.json`**,
    `contact-search-openapi.json`, `contact-card-template.json`, `color.png`, and
    `outline.png` together at the ZIP archive root. Upload through Teams **Manage
    your apps → Upload an app** or your organization's catalog. Do not include the
-   existing bot manifest: Teams supports only one compose extension per app.
-   The original `teams/tabs-bot-extension/manifest.json`, bot endpoint, and tabs remain unchanged.
+   tab-and-bot manifest: Teams supports only one compose extension per app. The
+   tab-and-bot app has its own manifest, tabs, and bot endpoint.
 
 The minimal OpenAPI 3.0.1 definition describes only
 `GET /api/teams/contact-search/?query=...`, with one required search parameter,

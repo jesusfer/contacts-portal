@@ -3,17 +3,21 @@
 The Bot Framework app provides two Teams compose commands:
 
 - **Search customers** searches customer company names. A result preview shows
-  the customer name, ID, contact count, and contacts. Selecting the preview
-  shows a customer card with a bounded contact list.
+  the customer name and contact count. Search is case-insensitive, accepts up to
+  200 characters, and returns the page size requested by Teams, up to 25
+  customers. Selecting a result shows its ID, contact count, and up to 20
+  contacts. The card stays within the Teams size limit and notes when it omits
+  contacts.
 - **Log call summary** opens a dialog to choose a customer, one of its contacts,
   and one of the current Agent's calls with that contact. The user can edit and
   save the call summary. Text from the selected Teams message is added to the
-  editable summary when available.
+  editable summary when available. Saving replaces the call's summary. The
+  message text and saved summary are limited to 4,000 characters.
 
-The search uses the shared company and contact directory. The call-summary
-action only offers the Agent's linked customers, their contacts, and that
-Agent's calls. The server checks these relationships again when the user submits
-each step.
+Both commands are limited to the authorized Agent's linked customers and those
+customers' contacts. The call-summary action only offers that Agent's calls.
+Each choice list shows up to 100 entries. The server checks customer, contact,
+and call access again when the user submits each step.
 
 The endpoint is `POST /api/teams/messages/`. It accepts Bot Framework channel
 requests only; browser session cookies do not authorize extension actions. Each
@@ -44,4 +48,5 @@ The extension returns HTTP 503 when any bot setting is missing. It does not use
 browser authentication or Graph permissions to authorize its actions.
 
 Cards inserted into a Teams conversation are visible to its participants.
-Share customer information only with authorized recipients.
+They show the selected customer's data at that time and do not update after
+portal changes. Share customer information only with authorized recipients.

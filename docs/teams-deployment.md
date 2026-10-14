@@ -14,12 +14,21 @@ and the selected OIDC provider.
 
 The tab-and-bot app uses `TEAMS_BOT_APP_ID` for the bot and the OIDC client ID
 for Teams SSO. The Contact Cards app uses the same OIDC client ID for SSO and a
-separate stable Teams app ID.
+separate stable Teams app ID. Set `TEAMS_BOT_PROVIDER_ID` and
+`TEAMS_API_PROVIDER_ID` to the configured OIDC provider IDs used by each
+extension.
 
 Use `python /absolute/path/to/contacts-portal/teams/package_manifests.py` to
 package the manifests. Configure the six values in `teams/teams.env.example`.
-The script writes `tabs-bot-extension.zip` and `api-extension.zip` under
-`teams/dist/`. See the [packaging guide](../teams/README.md) for details.
+The script reads `teams/teams.env` and writes
+`teams/dist/tabs-bot-extension.zip` and `teams/dist/api-extension.zip`. Each
+archive contains a root-level `manifest.json`, its JSON resources, and icons.
+See the [packaging guide](../teams/README.md) for details.
+
+Replace the package placeholders with the public HTTPS hostname, the two stable
+Teams app IDs, the Entra client ID, OIDC provider ID, and bot app ID. Set real
+developer, privacy, and terms URLs in each manifest. The portal does not provide
+privacy or terms pages.
 
 ## Production settings
 
@@ -40,10 +49,16 @@ Teams manifest, and portal settings must match.
 ## Check the installation
 
 1. Open the personal tab in Teams and confirm that SSO verifies the current user.
-2. Check the profile, calendar, Inbox, and presence views.
+2. Check the profile, calendar, Inbox, and presence views. In the default
+   Graph-only mode, confirm that the tab does not make CRM or Django session
+   requests before the user opens the full dashboard.
 3. Open **Open full dashboard** and check that a linked, provisioned user can
    access CRM data.
 4. Configure a customer tab in a team or group chat. Confirm it shows the
    selected customer's contacts and the current Agent's calls.
-5. Test each messaging extension with an account that has an Agent. Confirm
-   unlinked or unprovisioned users cannot access CRM data.
+5. Test bot customer search and the call-summary action with different Agents.
+   Confirm that customer search and action choices only show the signed-in
+   Agent's customers and calls.
+6. Test Contact Cards search with different Agents. Confirm that contact search
+   uses the shared directory but each card only shows the current Agent's calls.
+   Confirm unlinked or unprovisioned users cannot access CRM data.

@@ -68,6 +68,11 @@ issuer tenant. Set it to `organizations` for a multitenant issuer. `audience`
 defaults to `client_id`. `authorized_client_ids` defaults to the Teams web and
 desktop/mobile client IDs listed above.
 
+The Application ID URI has the form
+`api://portal.example.com/<entra-client-id>` or
+`api://portal.example.com/botid-<entra-client-id>`. Use the exact URI in the
+Teams app manifest and OIDC provider settings.
+
 For the full dashboard, each user must first sign in through this OIDC provider.
 This links the account to the verified Entra tenant and object ID. Email address
 does not link accounts. An administrator must provision an Agent for CRM access.
