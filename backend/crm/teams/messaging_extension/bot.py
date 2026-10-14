@@ -80,7 +80,7 @@ class CustomerMessagingExtension(TeamsActivityHandler):
             return await sync_to_async(handle_action)(
                 agent, turn_context.activity.name, value
             )
-        return await handle_search(turn_context.activity)
+        return await handle_search(agent, turn_context.activity)
 
 
 async def channel_claims_only(claims):
