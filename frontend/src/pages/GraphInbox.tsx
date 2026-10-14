@@ -38,7 +38,7 @@ export function GraphInbox({ version, compact = false }) {
               </strong>
               <p>{email.subject || '(No subject)'}</p>
               <small>{dateTime(email.received_at)}</small>
-              {!compact && <p class="graph-message-body">{email.body}</p>}
+              {!compact && <p class="graph-message-body">{email.body.slice(0, 50) || '(Empty message)'}</p>}
               <GraphLink url={email.web_url}>Open message</GraphLink>
             </div>
             <Badge status={email.is_read ? 'read' : 'unread'} />
