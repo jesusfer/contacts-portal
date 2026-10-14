@@ -5,12 +5,14 @@ import { TeamsCustomerTab } from './pages/TeamsCustomerTab.tsx'
 import { TeamsTab } from './pages/TeamsTab.tsx'
 
 export function App() {
-  return <AppRoutes
-    workspace={<WorkspaceApp/>}
-    pages={{
-      '/teams/config/': TeamsConfig,
-      '/teams/customer/': TeamsCustomerTab,
-      '/teams/tab/': TeamsTab,
-    }}
-  />
+  return (
+    <AppRoutes
+      workspace={<WorkspaceApp />}
+      pages={{
+        '/teams/config/': TeamsConfig,
+        '/teams/customer/': TeamsCustomerTab,
+        '/teams/tab/': TeamsTab,
+      }}
+    />
+  )
 }

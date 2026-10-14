@@ -7,6 +7,20 @@ interface PageHeadingProps {
   children?: ComponentChildren
 }
 
-export function PageHeading({ eyebrow = 'Your workspace', title, subtitle, children }: PageHeadingProps) {
-  return <div class="page-heading"><div><div class="eyebrow">{eyebrow}</div><h1>{title}</h1><p class="muted">{subtitle}</p></div>{children}</div>
+export function PageHeading({
+  eyebrow = 'Your workspace',
+  title,
+  subtitle,
+  children,
+}: PageHeadingProps) {
+  return (
+    <div class="page-heading">
+      <div>
+        <div class="eyebrow">{eyebrow}</div>
+        <h1>{title}</h1>
+        <p class="muted">{subtitle}</p>
+      </div>
+      {children}
+    </div>
+  )
 }

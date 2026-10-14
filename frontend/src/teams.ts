@@ -13,13 +13,21 @@ export function initializeTeams() {
       try {
         await Promise.race([
           app.initialize(),
-          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Open this page in Microsoft Teams to continue.')), 5000) }),
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error('Open this page in Microsoft Teams to continue.')),
+              5000,
+            )
+          }),
         ])
         return app
       } finally {
         clearTimeout(timer)
       }
-    })().catch(error => { initialization = null; throw error })
+    })().catch((error) => {
+      initialization = null
+      throw error
+    })
   }
   return initialization
 }
@@ -43,9 +51,16 @@ export async function getTeamsAuthToken() {
  * @throws {Error} If the response is not JSON or the request fails.
  */
 async function request(path, options = {}, query = '') {
-  const response = await fetch(`/api/teams/${path}/${query}`, { credentials: 'same-origin', ...options })
+  const response = await fetch(`/api/teams/${path}/${query}`, {
+    credentials: 'same-origin',
+    ...options,
+  })
   let data
-  try { data = await response.json() } catch { throw new Error('Teams sign-in returned an unexpected response. Please try again.') }
+  try {
+    data = await response.json()
+  } catch {
+    throw new Error('Teams sign-in returned an unexpected response. Please try again.')
+  }
   if (!response.ok) throw new Error(data.error || `Teams request failed (${response.status}).`)
   return data
 }
@@ -66,7 +81,9 @@ export function exchangeTeamsToken(providerId, token, { graphOnly = false } = {}
 }
 
 /** Fetch the available Teams/Graph provider configuration. */
-export function getTeamsConfig() { return request('config') }
+export function getTeamsConfig() {
+  return request('config')
+}
 
 /**
  * Read the current Teams tab configuration from the Teams SDK.
@@ -94,7 +111,11 @@ export function getTeamsCustomers(providerId) {
  * @returns {Promise<unknown>} The customer response.
  */
 export function getTeamsCustomer(providerId, customerId) {
-  return request(`customers/${encodeURIComponent(customerId)}`, {}, `?provider=${encodeURIComponent(providerId)}`)
+  return request(
+    `customers/${encodeURIComponent(customerId)}`,
+    {},
+    `?provider=${encodeURIComponent(providerId)}`,
+  )
 }
 
 /**
@@ -109,7 +130,7 @@ export async function registerTeamsConfigHandler(getSelection) {
   await initializeTeams()
   const { pages } = await import('@microsoft/teams-js')
   pages.config.setValidityState(false)
-  pages.config.registerOnSaveHandler(async event => {
+  pages.config.registerOnSaveHandler(async (event) => {
     try {
       const { provider, customer } = getSelection() || {}
       if (!provider || !customer) throw new Error('Sign in and select a customer before saving.')
@@ -130,10 +151,15 @@ export async function registerTeamsConfigHandler(getSelection) {
       event.notifyFailure(error.message || 'Unable to save this tab. Please try again.')
     }
   })
-  return valid => pages.config.setValidityState(valid)
+  return (valid) => pages.config.setValidityState(valid)
 }
 
 /** Read and URL-decode the browser's Django CSRF cookie. */
 export function getCsrfToken() {
-  return decodeURIComponent(document.cookie.split('; ').find(c => c.startsWith('csrftoken='))?.slice(10) || '')
+  return decodeURIComponent(
+    document.cookie
+      .split('; ')
+      .find((c) => c.startsWith('csrftoken='))
+      ?.slice(10) || '',
+  )
 }
