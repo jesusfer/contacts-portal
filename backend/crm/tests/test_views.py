@@ -632,6 +632,9 @@ class OIDCSettingsTests(TestCase):
             DJANGO_CSRF_TRUSTED_ORIGINS="https://portal.example, https://second.example",
             DJANGO_SETTINGS_MODULE="config.settings",
         )
+        env["PYTHONPATH"] = os.pathsep.join((
+            str(Path(__file__).resolve().parent.parent.parent), env.get("PYTHONPATH", ""),
+        ))
         result = subprocess.run(
             [sys.executable, "-c",
              "from django.conf import settings; "
@@ -649,6 +652,9 @@ class OIDCSettingsTests(TestCase):
             DJANGO_DEBUG="0", DJANGO_SECRET_KEY=secrets.token_urlsafe(64),
             DJANGO_SETTINGS_MODULE="config.settings",
         )
+        env["PYTHONPATH"] = os.pathsep.join((
+            str(Path(__file__).resolve().parent.parent.parent), env.get("PYTHONPATH", ""),
+        ))
         for name in ("DJANGO_SECURE_COOKIES", "DJANGO_SECURE_SSL_REDIRECT", "DJANGO_TRUST_PROXY"):
             env.pop(name, None)
         cases = [

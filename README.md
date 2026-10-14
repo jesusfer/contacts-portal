@@ -105,7 +105,7 @@ mode by default; never use this mode for deployment.
 Validation:
 
 ```
-python backend/manage.py test
+python backend/manage.py test crm
 python backend/manage.py check
 python backend/manage.py makemigrations --check --dry-run
 cd frontend
