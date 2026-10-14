@@ -6,7 +6,7 @@ import re
 from botbuilder.schema import InvokeResponse
 from django.utils.html import strip_tags
 
-from ...models import Call, Company, Contact
+from ...models import Call, Contact
 
 
 ACTION_COMMAND_ID = "logCallSummary"
@@ -74,9 +74,9 @@ def _choice_step(step, intro, input_id, label, choices, data, extra=()):
     }
 
 
-def customer_step(message):
+def customer_step(agent, message):
     """First step: choose a customer."""
-    companies = list(Company.objects.all()[:CHOICE_LIMIT])
+    companies = list(agent.companies.all()[:CHOICE_LIMIT])
     if not companies:
         return task_response(message="No customers are available.")
     return task_response(
@@ -155,7 +155,7 @@ def handle_action(agent, name, value):
     if not isinstance(value, dict) or value.get("commandId") != ACTION_COMMAND_ID:
         return InvokeResponse(status=400)
     if name == "composeExtension/fetchTask":
-        return customer_step(message_text(value.get("messagePayload")))
+        return customer_step(agent, message_text(value.get("messagePayload")))
     data = value.get("data")
     if not isinstance(data, dict):
         return InvokeResponse(status=400)
@@ -163,9 +163,11 @@ def handle_action(agent, name, value):
     message = message[:SUMMARY_LIMIT] if isinstance(message, str) else ""
     step = data.get("step")
     if step == "customer":
-        company = Company.objects.filter(pk=_pk(data.get("customer_id"))).first()
+        company = agent.companies.filter(pk=_pk(data.get("customer_id"))).first()
         return contact_step(company, message) if company else InvokeResponse(status=404)
-    contact = Contact.objects.filter(pk=_pk(data.get("contact_id"))).first()
+    contact = Contact.objects.filter(
+        pk=_pk(data.get("contact_id")), company__in=agent.companies.all()
+    ).first()
     if not contact:
         return InvokeResponse(status=404)
     if step == "contact":

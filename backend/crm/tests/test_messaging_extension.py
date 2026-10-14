@@ -171,6 +171,7 @@ class MessagingExtensionTests(TestCase):
         return self.post(self.activity(name=name, value=value))
 
     def test_action_command_flow_saves_summary_from_message(self):
+        self.agent.companies.add(self.company)
         call = self.agent.calls.get()
         response = self.action(
             "composeExtension/fetchTask",
@@ -210,6 +211,7 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(call.summary, "Private call\n\nDone")
 
     def test_action_command_appends_to_existing_summary(self):
+        self.agent.companies.add(self.company)
         call = self.agent.calls.get()
         self.action(
             "composeExtension/submitAction",
@@ -224,6 +226,7 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(call.summary, "Private call\n\nNew note")
 
     def test_action_command_rejects_other_agents_calls(self):
+        self.agent.companies.add(self.company)
         other = Agent.objects.create(user=get_user_model().objects.create_user("other"))
         call = Call.objects.create(agent=other, contact=self.contact)
         response = self.action(
@@ -242,6 +245,92 @@ class MessagingExtensionTests(TestCase):
             ).status_code,
             404,
         )
+
+    def test_action_command_lists_only_linked_companies(self):
+        linked = Company.objects.create(name="Linked customer")
+        unlinked = Company.objects.create(name="Other customer")
+        other = Agent.objects.create(user=get_user_model().objects.create_user("other"))
+        other.companies.add(unlinked)
+        self.agent.companies.add(self.company, linked)
+
+        response = self.action("composeExtension/fetchTask")
+
+        self.assertEqual(response.status_code, 200)
+        card = response.json()["task"]["value"]["card"]["content"]
+        self.assertEqual(
+            card["body"][1]["choices"],
+            [
+                {"title": "Acme", "value": str(self.company.pk)},
+                {"title": "Linked customer", "value": str(linked.pk)},
+            ],
+        )
+
+    def test_action_command_without_linked_companies_has_no_customers(self):
+        response = self.action("composeExtension/fetchTask")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["task"],
+            {"type": "message", "value": "No customers are available."},
+        )
+
+    def test_action_command_lists_only_selected_linked_company_contacts(self):
+        self.agent.companies.add(self.company)
+        other = Company.objects.create(name="Other customer")
+        Contact.objects.create(
+            name="Other contact", email="other@example.com", company=other
+        )
+
+        response = self.action(
+            "composeExtension/submitAction",
+            data={"step": "customer", "customer_id": str(self.company.pk)},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        card = response.json()["task"]["value"]["card"]["content"]
+        self.assertEqual(
+            card["body"][1]["choices"],
+            [{"title": "Alice (alice@example.com)", "value": str(self.contact.pk)}],
+        )
+
+    def test_action_command_rejects_unlinked_company_at_every_step(self):
+        call = self.agent.calls.get()
+        for step in ("customer", "contact", "call"):
+            with self.subTest(step=step):
+                response = self.action(
+                    "composeExtension/submitAction",
+                    data={
+                        "step": step,
+                        "customer_id": str(self.company.pk),
+                        "contact_id": str(self.contact.pk),
+                        "call_id": str(call.pk),
+                        "summary": "Unauthorized note",
+                    },
+                )
+                self.assertEqual(response.status_code, 404)
+        call.refresh_from_db()
+        self.assertEqual(call.summary, "Private call")
+
+    def test_action_command_rechecks_company_membership_after_fetch(self):
+        self.agent.companies.add(self.company)
+        response = self.action("composeExtension/fetchTask")
+        self.assertEqual(response.status_code, 200)
+        self.agent.companies.remove(self.company)
+        call = self.agent.calls.get()
+
+        response = self.action(
+            "composeExtension/submitAction",
+            data={
+                "step": "call",
+                "contact_id": str(self.contact.pk),
+                "call_id": str(call.pk),
+                "summary": "Unauthorized note",
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        call.refresh_from_db()
+        self.assertEqual(call.summary, "Private call")
 
     def test_empty_query_no_matches_and_customer_without_contacts(self):
         empty = Company.objects.create(name="Empty customer")
