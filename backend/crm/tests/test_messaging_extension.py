@@ -136,6 +136,7 @@ class MessagingExtensionTests(TestCase):
         )
 
     def test_search_returns_insertable_adaptive_card_and_preview(self):
+        self.agent.companies.add(self.company)
         response = self.post()
         self.assertEqual(response.status_code, 200)
         result = response.json()["composeExtension"]
@@ -164,7 +165,24 @@ class MessagingExtensionTests(TestCase):
         self.assertNotIn("Private call", content)
         self.assertNotIn("fixture", content)
         self.assertEqual(response["Cache-Control"], "private, no-store")
-        self.assertEqual(self.agent.companies.count(), 0)
+        self.assertEqual(self.agent.companies.count(), 1)
+
+    def test_search_and_selection_only_include_linked_companies(self):
+        linked = Company.objects.create(name="Linked customer")
+        unlinked = Company.objects.create(name="Unlinked customer")
+        other = Agent.objects.create(user=get_user_model().objects.create_user("other"))
+        other.companies.add(unlinked)
+        self.agent.companies.add(linked)
+
+        response = self.post(self.activity(text="customer"))
+
+        self.assertEqual(response.status_code, 200)
+        titles = [
+            attachment["preview"]["content"]["title"]
+            for attachment in response.json()["composeExtension"]["attachments"]
+        ]
+        self.assertEqual(titles, ["Linked customer"])
+        self.assertEqual(self.select(unlinked.pk).status_code, 404)
 
     def action(self, name, **value):
         value.setdefault("commandId", "logCallSummary")
@@ -334,6 +352,7 @@ class MessagingExtensionTests(TestCase):
 
     def test_empty_query_no_matches_and_customer_without_contacts(self):
         empty = Company.objects.create(name="Empty customer")
+        self.agent.companies.add(self.company, empty)
         result = self.post(self.activity(text="missing")).json()["composeExtension"]
         self.assertEqual(result["attachments"], [])
         result = self.select(empty.pk).json()["composeExtension"]
@@ -342,8 +361,10 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(len(result["attachments"]), 2)
 
     def test_results_are_ordered_paginated_and_bounded(self):
-        for index in range(30):
-            Company.objects.create(name=f"Customer {index:02}")
+        companies = [
+            Company.objects.create(name=f"Customer {index:02}") for index in range(30)
+        ]
+        self.agent.companies.add(*companies)
         activity = self.activity(text="Customer")
         activity["value"]["queryOptions"] = {"skip": 0, "count": PAGE_SIZE}
         attachments = self.post(activity).json()["composeExtension"]["attachments"]
@@ -355,6 +376,7 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(attachments[0]["preview"]["content"]["title"], "Customer 25")
 
     def test_contact_limit_and_markdown_escaping(self):
+        self.agent.companies.add(self.company)
         self.company.name = "[Acme](https://untrusted.example)"
         self.company.save()
         for index in range(CONTACT_LIMIT + 1):
@@ -374,6 +396,7 @@ class MessagingExtensionTests(TestCase):
         )
 
     def test_card_byte_limit_with_unicode_contacts(self):
+        self.agent.companies.add(self.company)
         Call.objects.filter(contact__company=self.company).delete()
         self.company.contacts.all().delete()
         for index in range(CONTACT_LIMIT):
@@ -579,6 +602,7 @@ class MessagingExtensionTests(TestCase):
         send.assert_not_awaited()
 
     def test_selection_rechecks_authorization_and_loads_current_details(self):
+        self.agent.companies.add(self.company)
         self.contact.name = "Updated contact"
         self.contact.save()
         self.assertIn("Updated contact", json.dumps(self.select().json()))
@@ -591,8 +615,11 @@ class MessagingExtensionTests(TestCase):
         self.assertEqual(self.select().status_code, 403)
 
     def test_search_payload_is_bounded_for_long_unicode_names(self):
-        for index in range(PAGE_SIZE):
+        companies = [
             Company.objects.create(name="😀" * 190 + str(index))
+            for index in range(PAGE_SIZE)
+        ]
+        self.agent.companies.add(*companies)
         response = self.post(self.activity(text="😀"))
         self.assertEqual(response.status_code, 200)
         self.assertLess(len(response.content), 100000)

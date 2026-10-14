@@ -76,19 +76,19 @@ def customer_card(company):
     return card
 
 
-def search_customers(text, skip, count):
+def search_customers(agent, text, skip, count):
     """Return a page of matching customers annotated with their contact counts."""
     return list(
-        Company.objects.filter(name__icontains=text).annotate(
+        agent.companies.filter(name__icontains=text).annotate(
             contact_count=Count("contacts"),
         )[skip : skip + count]
     )
 
 
-def selected_customer(pk):
+def selected_customer(agent, pk):
     """Fetch one customer with a bounded set of contacts for its detail card."""
     return (
-        Company.objects.annotate(contact_count=Count("contacts"))
+        agent.companies.annotate(contact_count=Count("contacts"))
         .prefetch_related(
             Prefetch(
                 "contacts",
@@ -113,14 +113,14 @@ def result_response(attachments):
     return InvokeResponse(status=200, body=response.serialize())
 
 
-async def handle_search(activity):
+async def handle_search(agent, activity):
     """Handle customer search and selected-customer invokes."""
     value = activity.value
     if activity.name == "composeExtension/selectItem":
         pk = value.get("customer_id") if isinstance(value, dict) else None
         if type(pk) is not int or not 0 < pk < 2**63:
             return InvokeResponse(status=400)
-        company = await sync_to_async(selected_customer)(pk)
+        company = await sync_to_async(selected_customer)(agent, pk)
         if not company:
             return InvokeResponse(status=404)
         card = CardFactory.adaptive_card(customer_card(company))
@@ -159,6 +159,7 @@ async def handle_search(activity):
     ):
         return InvokeResponse(status=400)
     companies = await sync_to_async(search_customers)(
+        agent,
         parameters[0]["value"].strip(),
         skip,
         count,
