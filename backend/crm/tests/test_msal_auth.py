@@ -135,6 +135,7 @@ class MSALAcquisitionTests(SimpleTestCase):
             requests.Timeout("private-secret"),
             requests.ConnectionError("private-secret"),
             ValueError("private-secret"),
+            RuntimeError("private-secret"),
         ):
             with self.subTest(exception=type(exception)):
                 application.return_value.acquire_token_on_behalf_of.side_effect = exception

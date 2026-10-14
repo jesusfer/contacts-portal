@@ -351,7 +351,14 @@ def exchange_graph_token(
             )
         ):
             raise GraphClientError("Invalid Graph token response.")
-    except (requests.RequestException, ValueError, TypeError, KeyError, AttributeError) as exc:
+    except (
+        requests.RequestException,
+        ValueError,
+        TypeError,
+        KeyError,
+        AttributeError,
+        RuntimeError,
+    ) as exc:
         raise GraphClientError("Graph token service unavailable.") from exc
     return token
 
@@ -403,6 +410,8 @@ class GraphTokenManager:
 
         A refreshed token is checked against the stored Entra object ID when
         available. Invalid or expired authorization raises ``TokenExpiredError``.
+        Legacy sessions without the user/provider/client binding require a fresh
+        sign-in; ordinary OIDC sessions need not contain an Entra object ID.
         """
         app = graph_provider(provider_id)
         token = request.session.get(cls.SESSION_KEY, {}).get(provider_id)
@@ -421,16 +430,10 @@ class GraphTokenManager:
                 or token.get("user_id") != str(user_id)
                 or token.get("provider_id") != provider_id
                 or token.get("client_id") != app["client_id"]
-                or not isinstance(token.get("oid"), str)
-                or not token["oid"]
-            ):
-                raise ValueError
-            identity = SocialAccount.objects.filter(
-                user_id=user_id, provider=provider_id
-            )
-            if not any(
-                account_identity(account.extra_data) == (token["oid"], tenant)
-                for account in identity
+                or (
+                    token.get("oid") is not None
+                    and not isinstance(token["oid"], str)
+                )
             ):
                 raise ValueError
             if (

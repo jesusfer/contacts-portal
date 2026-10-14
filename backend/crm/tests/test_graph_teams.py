@@ -782,7 +782,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def setUp(self):
         cache.clear()
 
-    def graph_login(self, *, expires_in=3600, refresh_token="session-refresh"):
+    def graph_login(self, *, expires_in=3600, refresh_token="session-refresh", oid=OID):
         self.client.force_login(self.user)
         session = self.client.session
         request = SimpleNamespace(session=session)
@@ -793,7 +793,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             refresh_token,
             expires_in,
             TENANT,
-            oid=OID,
+            oid=oid,
         )
         session[AUTH_SOURCE_SESSION_KEY] = "entraid-work"
         session.save()
@@ -1079,11 +1079,11 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.graph_login(expires_in=-1)
         get.return_value = response(PROFILE)
         renewed = {
-                "access_token": "renewed-access",
-                "refresh_token": "renewed-refresh",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
+            "access_token": "renewed-access",
+            "refresh_token": "renewed-refresh",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
 
         def migrate(*args, **kwargs):
             post.call_args.kwargs["token_cache"].add(
@@ -1132,10 +1132,10 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.graph_login(expires_in=-1)
         get.return_value = response(PROFILE)
         post.return_value.acquire_token_by_refresh_token.return_value = {
-                "access_token": "renewed-access",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
+            "access_token": "renewed-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 200)
         self.assertEqual(
             self.client.session["graph_tokens"]["entraid-work"]["refresh_token"],
@@ -1143,10 +1143,11 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         )
 
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    def test_graph_session_bindings_are_checked_before_using_cached_tokens(self, client):
+    @patch("crm.graph.requests.get")
+    def test_graph_session_bindings_are_checked_before_using_cached_tokens(self, get, client):
+        get.return_value = response(PROFILE)
         for field, value in (
             ("user_id", str(self.first.pk)),
-            ("oid", "another-object"),
             ("provider_id", "entraid-other"),
             ("client_id", "another-client"),
             ("tenant_id", CLIENT),
@@ -1159,6 +1160,54 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
                 self.assertNotIn("graph_tokens", self.client.session)
         client.assert_not_called()
+        get.assert_not_called()
+
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
+    @patch("crm.graph.requests.get")
+    def test_browser_oidc_sessions_without_linked_oid_remain_usable_and_refreshable(
+        self, get, application
+    ):
+        self.account.extra_data = {"id_token": {"tid": TENANT, "sub": "oidc-sub"}}
+        self.account.save()
+        get.return_value = response(PROFILE)
+        application.return_value.acquire_token_by_refresh_token.return_value = {
+            "access_token": "refreshed-browser-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
+        for expires_in, oid in ((3600, None), (-1, None), (3600, OID), (-1, OID)):
+            with self.subTest(expires_in=expires_in, oid=oid):
+                self.graph_login(expires_in=expires_in, oid=oid)
+                result = self.client.get("/api/graph/profile/")
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.json()["id"], OID)
+                self.assertEqual(
+                    self.client.session["graph_tokens"]["entraid-work"]["oid"], oid
+                )
+        application.return_value.acquire_token_by_refresh_token.assert_called_with(
+            "session-refresh", scopes=["https://graph.microsoft.com/.default"]
+        )
+        self.assertEqual(
+            application.return_value.acquire_token_by_refresh_token.call_count, 2
+        )
+        self.assertEqual(get.call_count, 5)
+
+    @patch("crm.teams.auth.msal.ConfidentialClientApplication")
+    def test_legacy_sessions_without_bindings_require_clean_reauthentication(
+        self, application
+    ):
+        for field in ("user_id", "provider_id", "client_id"):
+            with self.subTest(field=field):
+                self.graph_login()
+                session = self.client.session
+                del session["graph_tokens"]["entraid-work"][field]
+                session.save()
+                result = self.client.get("/api/graph/profile/")
+                self.assertEqual(result.status_code, 403)
+                self.assertNotIn("graph_tokens", self.client.session)
+                self.assertNotIn("graph_enabled", self.client.session)
+                self.assertNotIn("crm_teams_authenticated", self.client.session)
+        application.assert_not_called()
 
     @patch("crm.teams.auth._get_jwks")
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
@@ -1275,10 +1324,10 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 self.assertNotIn("session-refresh", str(result.json()))
         self.graph_login(expires_in=-1)
         post.return_value.acquire_token_by_refresh_token.return_value = {
-                "access_token": "renewed-access",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
+            "access_token": "renewed-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         get.return_value = response({**PROFILE, "id": "another-user"})
         self.assertEqual(self.client.get("/api/graph/profile/").status_code, 403)
         self.assertNotIn("graph_tokens", self.client.session)
@@ -1291,11 +1340,11 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     ):
         keys.return_value = self.jwks
         post.return_value.acquire_token_on_behalf_of.return_value = {
-                "access_token": "obo-access",
-                "refresh_token": "obo-refresh",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
+            "access_token": "obo-access",
+            "refresh_token": "obo-refresh",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         get.return_value = response(PROFILE)
         token = self.token()
         result = self.sso(token)
@@ -1347,10 +1396,10 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
     def test_sso_obo_graph_identity_mismatch_does_not_login(self, get, post, keys):
         keys.return_value = self.jwks
         post.return_value.acquire_token_on_behalf_of.return_value = {
-                "access_token": "obo-access",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
+            "access_token": "obo-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         get.return_value = response({**PROFILE, "id": "different-object"})
         self.assertEqual(self.sso().status_code, 403)
         self.assertNotIn("_auth_user_id", self.client.session)
@@ -1567,10 +1616,10 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         keys.return_value = self.jwks
         get.return_value = response(PROFILE)
         post.return_value.acquire_token_on_behalf_of.return_value = {
-                "access_token": "obo-access",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-            }
+            "access_token": "obo-access",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
         client = Client(enforce_csrf_checks=True)
         config = client.get("/api/teams/config/")
         data = {"provider_id": "entraid-work", "token": self.token()}

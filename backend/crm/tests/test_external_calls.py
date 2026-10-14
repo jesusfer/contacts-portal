@@ -1,3 +1,4 @@
+import json
 from unittest.mock import Mock, patch
 
 import requests
@@ -8,7 +9,7 @@ from django.test import SimpleTestCase
 
 from ..external_calls import logged_request
 from ..graph import GraphClient, GraphClientError, TokenExpiredError
-from ..teams.auth import _get_jwks, exchange_graph_token
+from ..teams.auth import MSALHTTPClient, _get_jwks, exchange_graph_token
 
 
 class ExternalCallLoggingTests(SimpleTestCase):
@@ -170,11 +171,13 @@ class ExternalCallLoggingTests(SimpleTestCase):
                     self.assertIsInstance(client.get_photo(), expected)
                 self.assertIn("operation=/me/photo/$value", logs.output[-1])
                 self.assertIn(f"status={status}", logs.output[-1])
-        get.return_value = self.response()
-        with self.assertLogs("crm.external_calls") as logs:
+        get.reset_mock()
+        with (
+            self.assertNoLogs("crm.external_calls"),
+            self.assertRaises(GraphClientError),
+        ):
             client._request("/users/private-person")
-        self.assertIn("operation=http_request", logs.output[-1])
-        self.assertNotIn("private-person", "\n".join(logs.output))
+        get.assert_not_called()
 
     @patch("crm.graph.requests.get")
     def test_graph_errors_keep_existing_public_exceptions(self, get):
@@ -200,7 +203,8 @@ class ExternalCallLoggingTests(SimpleTestCase):
         self.assertNotIn("exception-secret", "\n".join(logs.output))
 
     @patch("crm.teams.auth.requests.post")
-    def test_entra_token_exchanges_are_traced_without_credentials(self, post):
+    @patch("crm.teams.auth.requests.get")
+    def test_entra_token_exchanges_are_traced_without_credentials(self, get, post):
         tenant = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         app = {
             "client_id": "client-id",
@@ -214,7 +218,14 @@ class ExternalCallLoggingTests(SimpleTestCase):
             "token_type": "Bearer",
             "expires_in": 3600,
         }
+        discovery = {
+            "authorization_endpoint": f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize",
+            "token_endpoint": f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+        }
+        get.return_value = self.response(data=discovery)
+        get.return_value._content = json.dumps(discovery).encode()
         post.return_value = self.response(data=token)
+        post.return_value._content = json.dumps(token).encode()
         for arguments, operation in (
             ({"assertion": "assertion-secret"}, "on_behalf_of"),
             ({"refresh_token": "refresh-secret"}, "refresh_token"),
@@ -223,7 +234,8 @@ class ExternalCallLoggingTests(SimpleTestCase):
                 self.subTest(operation=operation),
                 self.assertLogs("crm.external_calls") as logs,
             ):
-                self.assertIs(exchange_graph_token(app, **arguments), token)
+                result = exchange_graph_token(app, **arguments)
+                self.assertEqual({key: result[key] for key in token}, token)
                 self.assertIn(
                     f"service=entraid operation={operation} method=POST",
                     logs.output[-1],
@@ -241,6 +253,39 @@ class ExternalCallLoggingTests(SimpleTestCase):
                 self.assertEqual(
                     post.call_args.kwargs["data"]["client_secret"], "client-secret"
                 )
+                self.assertEqual(get.call_args.kwargs["timeout"], 10)
+                self.assertFalse(get.call_args.kwargs["allow_redirects"])
+
+    @patch("crm.teams.auth.requests.post")
+    def test_entra_errors_and_malformed_bodies_never_reach_sdk_logging(self, post):
+        transport = MSALHTTPClient("refresh_token")
+        for status, data, expected in (
+            (400, {"error": "invalid_grant", "error_description": "refresh-secret"}, TokenExpiredError),
+            (500, {"error_description": "refresh-secret"}, GraphClientError),
+            (200, ["refresh-secret"], GraphClientError),
+        ):
+            with self.subTest(status=status, data=data):
+                post.return_value = self.response(status, data=data)
+                with (
+                    self.assertLogs("crm.external_calls") as logs,
+                    self.assertNoLogs("msal"),
+                    self.assertRaises(expected) as raised,
+                ):
+                    transport.post(
+                        "https://login.microsoftonline.com/tenant/token",
+                        data={"refresh_token": "refresh-secret"},
+                    )
+                self.assertNotIn("refresh-secret", str(raised.exception))
+                self.assertNotIn("refresh-secret", "\n".join(logs.output))
+        post.return_value = self.response()
+        post.return_value.json.side_effect = ValueError("malformed-response-secret")
+        with (
+            self.assertLogs("crm.external_calls") as logs,
+            self.assertNoLogs("msal"),
+            self.assertRaises(GraphClientError),
+        ):
+            transport.post("https://login.microsoftonline.com/tenant/token")
+        self.assertNotIn("malformed-response-secret", "\n".join(logs.output))
 
     @patch("crm.teams.auth.requests.get")
     def test_signing_key_cache_only_traces_actual_requests(self, get):
