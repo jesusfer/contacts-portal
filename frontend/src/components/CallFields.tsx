@@ -1,3 +1,4 @@
+// Provides editable status, summary, and rating fields for a call.
 import { statuses } from '../utils/data.ts'
 export function CallFields({ status, setStatus, summary, setSummary, rating, setRating }) {
   return (

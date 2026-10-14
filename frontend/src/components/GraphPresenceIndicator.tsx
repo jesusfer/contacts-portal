@@ -1,3 +1,4 @@
+// Polls and displays the signed-in user's Microsoft Graph presence.
 import { useEffect, useState } from 'preact/hooks'
 import { api } from '../utils/data.ts'
 export function GraphPresenceIndicator({ user }) {

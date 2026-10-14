@@ -1,3 +1,4 @@
+// Renders the CRM workspace shell, navigation, and shared page state.
 import { useEffect, useState } from 'preact/hooks'
 import { api, date } from './utils/data.ts'
 import type { Session } from './utils/data.ts'

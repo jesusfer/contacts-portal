@@ -1,3 +1,4 @@
+// Renders the sign-in form and submits user credentials.
 import { useState } from 'preact/hooks'
 import { api } from '../utils/data.ts'
 import { ErrorNotice } from '../components/ErrorNotice.tsx'

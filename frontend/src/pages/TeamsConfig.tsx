@@ -1,3 +1,4 @@
+// Configures authentication providers and customer selection for Teams tabs.
 import { useEffect, useRef, useState } from 'preact/hooks'
 import * as TeamsSDK from '../teams.ts'
 import { ErrorNotice } from '../components/ErrorNotice.tsx'

@@ -1,3 +1,4 @@
+// Displays a contact's initials, name, and company or email.
 import { initials } from '../utils/data.ts'
 export function Contact({ contact }) {
   return (

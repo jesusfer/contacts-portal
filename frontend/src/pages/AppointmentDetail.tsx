@@ -1,3 +1,4 @@
+// Displays and edits the details of a selected appointment.
 import { useEffect, useState } from 'preact/hooks'
 import { api, appointmentPayload, localInput, useResource } from '../utils/data.ts'
 import { AppointmentFields } from '../components/AppointmentFields.tsx'

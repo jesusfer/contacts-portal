@@ -1,3 +1,4 @@
+// Displays an appointment summary row linked to its detail page.
 import { date, time } from '../utils/data.ts'
 import { Icon } from './Icon.tsx'
 export function AppointmentRow({ appointment }) {

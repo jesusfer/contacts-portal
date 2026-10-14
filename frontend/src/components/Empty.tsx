@@ -1,3 +1,4 @@
+// Renders an icon and message for an empty content area.
 import type { ComponentChildren } from 'preact'
 import { Icon } from './Icon.tsx'
 

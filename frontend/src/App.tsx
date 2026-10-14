@@ -1,3 +1,4 @@
+// Routes standalone workspace pages and Microsoft Teams tabs.
 import { AppRoutes } from './routes.tsx'
 import { WorkspaceApp } from './WorkspaceApp.tsx'
 import { TeamsConfig } from './pages/TeamsConfig.tsx'

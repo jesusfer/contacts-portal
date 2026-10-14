@@ -1,3 +1,4 @@
+// Selects the initial Teams identity provider and renders its selector.
 export function initialProvider(providers) {
   const query = new URLSearchParams(location.search)
   if (query.has('provider')) {

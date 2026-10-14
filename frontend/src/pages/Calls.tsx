@@ -1,3 +1,4 @@
+// Lists CRM calls with status filtering and text search.
 import { useState } from 'preact/hooks'
 import { dateTime, statuses, useResource } from '../utils/data.ts'
 import { Contact } from '../components/Contact.tsx'

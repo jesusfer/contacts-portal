@@ -1,3 +1,4 @@
+// Displays loading, error, and load-more controls for Graph resources.
 import { Loading } from './Loading.tsx'
 import { ErrorNotice } from './ErrorNotice.tsx'
 export function GraphPagination({ resource }) {

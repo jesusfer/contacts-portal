@@ -1,3 +1,4 @@
+// Displays and updates the signed-in user's profile settings.
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { api, useResource } from '../utils/data.ts'
 import { ErrorNotice } from '../components/ErrorNotice.tsx'

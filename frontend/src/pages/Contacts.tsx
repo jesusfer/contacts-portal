@@ -1,3 +1,4 @@
+// Lists CRM contacts with text search and contact creation access.
 import { useState } from 'preact/hooks'
 import { useResource } from '../utils/data.ts'
 import { Contact } from '../components/Contact.tsx'

@@ -1,3 +1,4 @@
+// Renders the CRM overview with KPIs, appointments, and inbox content.
 import { date, initials, useResource } from '../utils/data.ts'
 import { AppointmentRow } from '../components/AppointmentRow.tsx'
 import { Badge } from '../components/Badge.tsx'

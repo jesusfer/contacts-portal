@@ -1,3 +1,4 @@
+// Lists and manages the CRM inbox with filtering and message actions.
 import { useEffect, useState } from 'preact/hooks'
 import { api, date, dateTime, useResource } from '../utils/data.ts'
 import { Badge } from '../components/Badge.tsx'
@@ -119,7 +120,9 @@ export function Inbox({ version, refresh, id }) {
                       <Badge status={selected.is_read ? 'read' : 'unread'} />
                       <Badge status={selected.is_replied ? 'replied' : 'not replied'} />
                     </div>
-                    <div class="email-content">{selected.body.slice(0, 50) || '(Empty message)'}</div>
+                    <div class="email-content">
+                      {selected.body.slice(0, 50) || '(Empty message)'}
+                    </div>
                     <div class="actions">
                       <button
                         class="button secondary"

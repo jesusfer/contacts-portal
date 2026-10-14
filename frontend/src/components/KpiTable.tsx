@@ -1,3 +1,4 @@
+// Displays call-performance metrics in a table within a panel.
 import { Panel } from './Panel.tsx'
 import { Empty } from './Empty.tsx'
 

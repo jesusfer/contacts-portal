@@ -1,3 +1,4 @@
+// Defines the application's SVG icons and renders a named icon.
 import type { ComponentChildren } from 'preact'
 
 const icons = {

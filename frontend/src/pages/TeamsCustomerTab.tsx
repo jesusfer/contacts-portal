@@ -1,3 +1,4 @@
+// Displays CRM customer information in a Microsoft Teams customer tab.
 import { useEffect, useState } from 'preact/hooks'
 import * as TeamsSDK from '../teams.ts'
 import { dateTime, initials } from '../utils/data.ts'

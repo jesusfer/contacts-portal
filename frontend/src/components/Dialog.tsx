@@ -1,3 +1,4 @@
+// Renders an accessible modal dialog and manages focus and dismissal.
 import { useEffect, useRef } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
 import { Icon } from './Icon.tsx'
