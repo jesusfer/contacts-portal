@@ -2,6 +2,8 @@ from django.contrib import admin
 from django.urls import include, path, re_path
 
 from crm import views
+from crm.api_messaging_extension import search_contacts
+from crm.messaging_extension import messages
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -20,6 +22,20 @@ urlpatterns = [
     path("api/inbox/", views.inbox),
     path("api/inbox/<int:pk>/", views.inbox_detail),
     path("api/kpis/", views.kpis),
+    # Graph API endpoints
+    path("api/graph/profile/", views.graph_profile),
+    path("api/graph/picture/", views.graph_picture),
+    path("api/graph/calendar/", views.graph_calendar),
+    path("api/graph/inbox/", views.graph_inbox),
+    path("api/graph/presence/", views.graph_presence),
+    # Teams configuration and SSO
+    path("api/teams/config/", views.teams_config),
+    path("api/teams/sso/", views.teams_sso),
+    path("api/teams/identity/", views.teams_identity),
+    path("api/teams/customers/", views.teams_customers),
+    path("api/teams/customers/<int:pk>/", views.teams_customer),
+    path("api/teams/messages/", messages),
+    path("api/teams/contact-search/", search_contacts),
     re_path(r"^(?:api|accounts|admin|static|media)(?:/|$)", views.not_found),
     re_path(r"^.*$", views.spa),
 ]

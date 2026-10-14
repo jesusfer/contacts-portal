@@ -1,0 +1,60 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.30",
+  "version": "1.0.0",
+  "id": "<TEAMS_API_APP_ID>",
+  "developer": {
+    "name": "Contacts Portal",
+    "websiteUrl": "https://<PORTAL_HOST>",
+    "privacyUrl": "https://<PORTAL_HOST>/privacy",
+    "termsOfUseUrl": "https://<PORTAL_HOST>/terms"
+  },
+  "name": {
+    "short": "Contact Cards",
+    "full": "Contacts Portal contact cards"
+  },
+  "description": {
+    "short": "Find customers and contacts and share their latest three calls.",
+    "full": "Search the Contacts Portal directory by customer, contact name, or email. Insert an Adaptive Card with the contact's details and your latest three call records into a Teams chat."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#FFFFFF",
+  "supportsChannelFeatures": "tier1",
+  "composeExtensions": [
+    {
+      "composeExtensionType": "apiBased",
+      "apiSpecificationFile": "contact-search-openapi.json",
+      "authorization": {
+        "authType": "microsoftEntra",
+        "microsoftEntraConfiguration": {
+          "supportsSingleSignOn": true
+        }
+      },
+      "commands": [
+        {
+          "id": "searchContacts",
+          "type": "query",
+          "title": "Find a contact",
+          "description": "Find contacts by customer, contact name, or email.",
+          "context": ["compose", "commandBox"],
+          "parameters": [
+            {
+              "name": "query",
+              "title": "Customer or contact",
+              "description": "Enter a customer, contact name, email, or a combination of search words."
+            }
+          ],
+          "apiResponseRenderingTemplateFile": "contact-card-template.json"
+        }
+      ]
+    }
+  ],
+  "validDomains": ["<PORTAL_HOST>"],
+  "webApplicationInfo": {
+    "id": "<TEAMS_SSO_APP_ID>",
+    "resource": "api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>"
+  }
+}

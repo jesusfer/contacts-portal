@@ -5,14 +5,38 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "npm run typecheck && npm run lint && vite build",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" vite.config.ts",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" vite.config.ts index.html package.json tsconfig.json eslint.config.js .prettierrc.json",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" vite.config.ts index.html package.json tsconfig.json eslint.config.js .prettierrc.json",
+    "prepare": "cd .. && husky frontend/.husky"
+  },
+  "lint-staged": {
+    "**/*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "**/*.{css,html,json,js}": "prettier --write"
   },
   "dependencies": {
+    "@microsoft/teams-js": "2.58.0",
+    "@microsoft/teams.client": "2.1.0",
+    "@microsoft/teams.graph-endpoints": "2.1.0",
     "preact": "11.0.1"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@preact/preset-vite": "2.10.6",
+    "eslint": "10.12.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.13.0",
+    "husky": "9.1.7",
+    "lint-staged": "17.6.0",
+    "prettier": "3.9.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "8.71.2",
     "vite": "8.3.4"
   }
 }
