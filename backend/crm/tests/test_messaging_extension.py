@@ -212,51 +212,210 @@ class MessagingExtensionTests(TestCase):
         )
         card = response.json()["task"]["value"]["card"]["content"]
         data = card["actions"][0]["data"]
+        self.assertEqual(data["message"], "Hello & bye")
         self.assertEqual(card["body"][1]["choices"][0]["value"], str(self.contact.pk))
         response = self.action(
             "composeExtension/submitAction",
             data={**data, "contact_id": str(self.contact.pk)},
         )
         card = response.json()["task"]["value"]["card"]["content"]
-        self.assertEqual(card["body"][2]["value"], "Hello & bye")
+        self.assertEqual(card["actions"][0]["title"], "Next")
+        data = card["actions"][0]["data"]
+        self.assertEqual(data["message"], "Hello & bye")
+        response = self.action(
+            "composeExtension/submitAction",
+            data={**data, "call_id": str(call.pk)},
+        )
+        card = response.json()["task"]["value"]["card"]["content"]
+        self.assertEqual(card["body"][1]["value"], "Private call\n\nHello & bye")
+        self.assertEqual(card["actions"][0]["title"], "Save summary")
+        call.refresh_from_db()
+        self.assertEqual(call.summary, "Private call")
         data = card["actions"][0]["data"]
         response = self.action(
             "composeExtension/submitAction",
-            data={**data, "call_id": str(call.pk), "summary": "Done"},
+            data={**data, "summary": "Private call\n\nDone"},
         )
         self.assertEqual(response.json()["task"]["type"], "message")
         call.refresh_from_db()
         self.assertEqual(call.summary, "Private call\n\nDone")
 
-    def test_action_command_appends_to_existing_summary(self):
+    def test_action_command_recovers_message_context_at_each_selection_step(self):
+        self.agent.companies.add(self.company)
+        call = self.agent.calls.get()
+        for message_data in ({}, {"message": ""}, {"message": None}):
+            for step in ("customer", "contact", "call"):
+                with self.subTest(message_data=message_data, step=step):
+                    response = self.action(
+                        "composeExtension/submitAction",
+                        commandContext="message",
+                        messagePayload={
+                            "body": {
+                                "contentType": "html",
+                                "content": "<p>Source &amp; note</p>",
+                            }
+                        },
+                        data={
+                            **message_data,
+                            "step": step,
+                            "customer_id": str(self.company.pk),
+                            "contact_id": str(self.contact.pk),
+                            "call_id": str(call.pk),
+                        },
+                    )
+                    self.assertEqual(response.status_code, 200)
+                    card = response.json()["task"]["value"]["card"]["content"]
+                    if step == "call":
+                        self.assertEqual(
+                            card["body"][1]["value"], "Private call\n\nSource & note"
+                        )
+                        response = self.action(
+                            "composeExtension/submitAction",
+                            data={
+                                **card["actions"][0]["data"],
+                                "summary": card["body"][1]["value"],
+                            },
+                        )
+                        self.assertEqual(response.status_code, 200)
+                        call.refresh_from_db()
+                        self.assertEqual(call.summary, "Private call\n\nSource & note")
+                        call.summary = "Private call"
+                        call.save(update_fields=["summary"])
+                    else:
+                        self.assertEqual(
+                            card["actions"][0]["data"]["message"], "Source & note"
+                        )
+
+    def test_action_command_prefers_carried_message_over_submit_context(self):
+        self.agent.companies.add(self.company)
+        response = self.action(
+            "composeExtension/submitAction",
+            messagePayload={"body": {"contentType": "text", "content": "Other text"}},
+            data={
+                "step": "customer",
+                "customer_id": str(self.company.pk),
+                "message": "Original text",
+            },
+        )
+        card = response.json()["task"]["value"]["card"]["content"]
+        self.assertEqual(card["actions"][0]["data"]["message"], "Original text")
+
+    def test_action_command_bounds_recovered_message_and_handles_missing_context(self):
+        self.agent.companies.add(self.company)
+        for payload, expected in (
+            ({"body": {"contentType": "text", "content": "x" * 4001}}, "x" * 4000),
+            (None, ""),
+            ({"body": {"content": None}}, ""),
+        ):
+            with self.subTest(payload=payload):
+                response = self.action(
+                    "composeExtension/submitAction",
+                    messagePayload=payload,
+                    data={"step": "customer", "customer_id": str(self.company.pk)},
+                )
+                self.assertEqual(response.status_code, 200)
+                card = response.json()["task"]["value"]["card"]["content"]
+                self.assertEqual(card["actions"][0]["data"]["message"], expected)
+
+    def test_action_command_edits_existing_summary(self):
         self.agent.companies.add(self.company)
         call = self.agent.calls.get()
         self.action(
             "composeExtension/submitAction",
             data={
-                "step": "call",
+                "step": "summary",
                 "contact_id": str(self.contact.pk),
                 "call_id": str(call.pk),
                 "summary": "New note",
             },
         )
         call.refresh_from_db()
-        self.assertEqual(call.summary, "Private call\n\nNew note")
+        self.assertEqual(call.summary, "New note")
 
-    def test_action_command_rejects_other_agents_calls(self):
+    def test_action_command_prefills_selected_calls_summary(self):
         self.agent.companies.add(self.company)
-        other = Agent.objects.create(user=get_user_model().objects.create_user("other"))
-        call = Call.objects.create(agent=other, contact=self.contact)
+        calls = [
+            self.agent.calls.get(),
+            Call.objects.create(
+                agent=self.agent, contact=self.contact, summary="Another call"
+            ),
+            Call.objects.create(agent=self.agent, contact=self.contact, summary=""),
+        ]
+        for call in calls:
+            with self.subTest(call=call.pk):
+                response = self.action(
+                    "composeExtension/submitAction",
+                    data={
+                        "step": "call",
+                        "contact_id": str(self.contact.pk),
+                        "call_id": str(call.pk),
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                card = response.json()["task"]["value"]["card"]["content"]
+                self.assertEqual(card["body"][1]["value"], call.summary)
+                data = card["actions"][0]["data"]
+                self.assertEqual(data["call_id"], str(call.pk))
+                if call.summary:
+                    response = self.action(
+                        "composeExtension/submitAction",
+                        data={**data, "summary": call.summary},
+                    )
+                    self.assertEqual(response.status_code, 200)
+                    call.refresh_from_db()
+                    self.assertEqual(call.summary, card["body"][1]["value"])
+
+    def test_action_command_prefills_message_for_call_without_summary(self):
+        self.agent.companies.add(self.company)
+        call = self.agent.calls.get()
+        call.summary = ""
+        call.save()
         response = self.action(
             "composeExtension/submitAction",
             data={
                 "step": "call",
                 "contact_id": str(self.contact.pk),
                 "call_id": str(call.pk),
-                "summary": "x",
+                "message": "Message note",
             },
         )
-        self.assertEqual(response.status_code, 404)
+        card = response.json()["task"]["value"]["card"]["content"]
+        self.assertEqual(card["body"][1]["value"], "Message note")
+
+    def test_action_command_rejects_invalid_edited_summary(self):
+        self.agent.companies.add(self.company)
+        call = self.agent.calls.get()
+        for summary in (None, "", " \n ", 123, "x" * 4001):
+            with self.subTest(summary=summary):
+                response = self.action(
+                    "composeExtension/submitAction",
+                    data={
+                        "step": "summary",
+                        "contact_id": str(self.contact.pk),
+                        "call_id": str(call.pk),
+                        "summary": summary,
+                    },
+                )
+                self.assertEqual(response.status_code, 400)
+        call.refresh_from_db()
+        self.assertEqual(call.summary, "Private call")
+
+    def test_action_command_rejects_other_agents_calls(self):
+        self.agent.companies.add(self.company)
+        other = Agent.objects.create(user=get_user_model().objects.create_user("other"))
+        call = Call.objects.create(agent=other, contact=self.contact)
+        for step in ("call", "summary"):
+            with self.subTest(step=step):
+                response = self.action(
+                    "composeExtension/submitAction",
+                    data={
+                        "step": step,
+                        "contact_id": str(self.contact.pk),
+                        "call_id": str(call.pk),
+                        "summary": "x",
+                    },
+                )
+                self.assertEqual(response.status_code, 404)
         self.assertEqual(
             self.action(
                 "composeExtension/submitAction", data={"step": "x"}
@@ -313,7 +472,7 @@ class MessagingExtensionTests(TestCase):
 
     def test_action_command_rejects_unlinked_company_at_every_step(self):
         call = self.agent.calls.get()
-        for step in ("customer", "contact", "call"):
+        for step in ("customer", "contact", "call", "summary"):
             with self.subTest(step=step):
                 response = self.action(
                     "composeExtension/submitAction",
@@ -339,7 +498,7 @@ class MessagingExtensionTests(TestCase):
         response = self.action(
             "composeExtension/submitAction",
             data={
-                "step": "call",
+                "step": "summary",
                 "contact_id": str(self.contact.pk),
                 "call_id": str(call.pk),
                 "summary": "Unauthorized note",

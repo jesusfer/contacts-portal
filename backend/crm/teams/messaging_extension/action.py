@@ -50,7 +50,7 @@ def task_response(card=None, title="Log call summary", message=None):
 def _choice_step(step, intro, input_id, label, choices, data, extra=()):
     submit = {
         "type": "Action.Submit",
-        "title": "Next" if step != "call" else "Save summary",
+        "title": "Next",
         "data": {**data, "step": step},
     }
     return {
@@ -112,33 +112,64 @@ def contact_step(company, message):
 
 
 def call_step(agent, contact, message):
-    """Third step: choose one of the agent's calls with the contact and complete its summary."""
+    """Third step: choose one of the agent's calls with the contact."""
     calls = list(Call.objects.filter(agent=agent, contact=contact)[:CHOICE_LIMIT])
     if not calls:
         return task_response(message="You have no calls with this contact.")
-    summary = {
-        "type": "Input.Text",
-        "id": "summary",
-        "label": "Summary",
-        "isMultiline": True,
-        "isRequired": True,
-        "errorMessage": "Enter a summary.",
-        "maxLength": SUMMARY_LIMIT,
-        "value": message,
-    }
     return task_response(
         _choice_step(
             "call",
-            f"Select the call with {contact.name} and complete its summary.",
+            f"Select the call with {contact.name}.",
             "call_id",
             "Call",
             [
                 {"title": f"#{c.pk} — {c.get_status_display()}", "value": str(c.pk)}
                 for c in calls
             ],
-            {"contact_id": str(contact.pk)},
-            extra=[summary],
+            {"contact_id": str(contact.pk), "message": message},
         )
+    )
+
+
+def summary_step(call, message):
+    """Final step: edit the selected call's current summary."""
+    summary = call.summary
+    if message:
+        summary = f"{summary.rstrip()}\n\n{message}" if summary.strip() else message
+    return task_response(
+        {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.3",
+            "body": [
+                {
+                    "type": "TextBlock",
+                    "text": f"Edit the summary for call #{call.pk}.",
+                    "wrap": True,
+                },
+                {
+                    "type": "Input.Text",
+                    "id": "summary",
+                    "label": "Summary",
+                    "isMultiline": True,
+                    "isRequired": True,
+                    "errorMessage": "Enter a summary.",
+                    "maxLength": SUMMARY_LIMIT,
+                    "value": summary,
+                },
+            ],
+            "actions": [
+                {
+                    "type": "Action.Submit",
+                    "title": "Save summary",
+                    "data": {
+                        "step": "summary",
+                        "contact_id": str(call.contact_id),
+                        "call_id": str(call.pk),
+                    },
+                }
+            ],
+        }
     )
 
 
@@ -160,7 +191,9 @@ def handle_action(agent, name, value):
     if not isinstance(data, dict):
         return InvokeResponse(status=400)
     message = data.get("message")
-    message = message[:SUMMARY_LIMIT] if isinstance(message, str) else ""
+    if not isinstance(message, str) or not message:
+        message = message_text(value.get("messagePayload"))
+    message = message[:SUMMARY_LIMIT]
     step = data.get("step")
     if step == "customer":
         company = agent.companies.filter(pk=_pk(data.get("customer_id"))).first()
@@ -172,7 +205,14 @@ def handle_action(agent, name, value):
         return InvokeResponse(status=404)
     if step == "contact":
         return call_step(agent, contact, message)
-    if step == "call":
+    if step in ("call", "summary"):
+        call = Call.objects.filter(
+            pk=_pk(data.get("call_id")), agent=agent, contact=contact
+        ).first()
+        if not call:
+            return InvokeResponse(status=404)
+        if step == "call":
+            return summary_step(call, message)
         summary = data.get("summary")
         if (
             not isinstance(summary, str)
@@ -180,15 +220,7 @@ def handle_action(agent, name, value):
             or len(summary) > SUMMARY_LIMIT
         ):
             return InvokeResponse(status=400)
-        call = Call.objects.filter(
-            pk=_pk(data.get("call_id")), agent=agent, contact=contact
-        ).first()
-        if not call:
-            return InvokeResponse(status=404)
-        summary = summary.strip()
-        call.summary = (
-            f"{call.summary.rstrip()}\n\n{summary}" if call.summary.strip() else summary
-        )
+        call.summary = summary.strip()
         call.save(update_fields=["summary"])
         return task_response(message="Call summary saved.")
     return InvokeResponse(status=400)
