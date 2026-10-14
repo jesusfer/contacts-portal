@@ -159,7 +159,7 @@ export async function teamsGraphRequest(path: string, { signal }: { signal?: Abo
     params = {
       $select: 'id,subject,body,bodyPreview,from,receivedDateTime,isRead,webLink',
       $orderby: 'receivedDateTime desc',
-      $top: '25',
+      $top: '5',
     }
     operation = me.mailFolders.messages.list
   } else {

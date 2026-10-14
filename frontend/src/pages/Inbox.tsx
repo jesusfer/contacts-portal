@@ -87,7 +87,7 @@ export function Inbox({ version, refresh, id }) {
                       </strong>
                       <small>{date(email.received_at)}</small>
                     </div>
-                    <p>{email.subject || '(No subject)'}</p>
+                    <p>{(email.subject || '(No subject)').slice(0, 50)}</p>
                     <div style="margin-top:8px">
                       <Badge
                         status={email.is_replied ? 'replied' : email.is_read ? 'read' : 'unread'}
@@ -119,7 +119,7 @@ export function Inbox({ version, refresh, id }) {
                       <Badge status={selected.is_read ? 'read' : 'unread'} />
                       <Badge status={selected.is_replied ? 'replied' : 'not replied'} />
                     </div>
-                    <div class="email-content">{selected.body || '(Empty message)'}</div>
+                    <div class="email-content">{selected.body.slice(0, 50) || '(Empty message)'}</div>
                     <div class="actions">
                       <button
                         class="button secondary"
