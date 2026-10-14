@@ -142,6 +142,8 @@ python backend/manage.py seed_demo --username your-username
 ```
 
 The command preserves existing user credentials and agent/company associations.
+It also associates the selected agent with both demo contact companies, so all
+seeded calls and emails involve contacts at companies associated with that agent.
 It skips the entire operation if the selected agent already has calls or inbox
 messages, so repeat runs do not duplicate activity, reset edits, or move
 appointments. Demo company/contact directory entries are reused, not overwritten;

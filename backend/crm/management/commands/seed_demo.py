@@ -106,6 +106,7 @@ class Command(BaseCommand):
         ):
             company, created = Company.objects.get_or_create(name=company_name)
             counts["companies"] += int(created)
+            agent.companies.add(company)
             for name, email in people:
                 contact, created = Contact.objects.get_or_create(
                     name=name,
