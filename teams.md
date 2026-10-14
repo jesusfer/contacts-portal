@@ -247,8 +247,8 @@ deleted: ordinary browser Graph views, full-dashboard Teams SSO, and portal
 session/profile responses depend on it. Graph-only startup does not use it.
 
 Implementation references: `frontend/src/App.tsx`, `frontend/src/teams.ts`,
-`frontend/src/teams-graph.ts`, `crm/views.py`, `crm/teams.py`, `crm/graph.py`,
-and `crm/signals.py`.
+`frontend/src/teams-graph.ts`, `backend/crm/views.py`, `backend/crm/teams.py`,
+`backend/crm/graph.py`, and `backend/crm/signals.py`.
 
 ## Entra application registration
 

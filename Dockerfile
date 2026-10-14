@@ -12,22 +12,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SQLITE_PATH=/app/data/db.sqlite3 \
     MEDIA_ROOT=/app/media
 WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
+COPY backend/ backend/
+RUN pip install --no-cache-dir -r backend/requirements.txt \
     && groupadd --gid 10001 portal \
     && useradd --uid 10001 --gid portal --no-create-home portal
-COPY manage.py ./
-COPY config/ config/
-COPY crm/ crm/
-COPY templates/ templates/
 COPY --from=frontend /build/frontend/dist/ frontend/dist/
-COPY docker-entrypoint.sh ./
 RUN mkdir -p data media staticfiles \
     && chown -R portal:portal /app \
-    && chmod +x docker-entrypoint.sh
+    && chmod +x backend/docker-entrypoint.sh
+WORKDIR /app/backend
 USER portal
 RUN DJANGO_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(64))')" \
     python manage.py collectstatic --noinput
 EXPOSE 8000
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+ENTRYPOINT ["/app/backend/docker-entrypoint.sh"]
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--access-logfile", "-", "--no-control-socket"]

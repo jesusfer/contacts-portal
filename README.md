@@ -37,10 +37,8 @@ an authenticated, private endpoint.
 ## Automated image builds
 
 The **Build and publish Docker image** GitHub Actions workflow builds the Dockerfile on
-pushes to `main` that change `crm/`, `frontend/`, or `Dockerfile`. It also
-watches the remaining image inputs (`config/`, Python requirements, `manage.py`,
-the entrypoint, `.dockerignore`, and authentication `templates/`) and its own
-workflow definition.
+pushes to `main` that change `backend/`, `frontend/`, `Dockerfile`, `.dockerignore`,
+or its own workflow definition.
 Builds use GitHub Actions caching and publish commit-SHA image tags.
 
 Configure these repository settings under **Settings → Secrets and variables
@@ -89,14 +87,14 @@ Requires Python 3.12+ and Node.js 22.12+.
 ```
 python -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py createsuperuser
+pip install -r backend/requirements.txt
+python backend/manage.py migrate
+python backend/manage.py createsuperuser
 cd frontend
 npm ci
 npm run build
 cd ..
-python manage.py runserver
+python backend/manage.py runserver
 ```
 
 Provision companies and agents in `/admin/` as above. For hot reload, keep
@@ -107,9 +105,9 @@ mode by default; never use this mode for deployment.
 Validation:
 
 ```
-python manage.py test
-python manage.py check
-python manage.py makemigrations --check --dry-run
+python backend/manage.py test crm
+python backend/manage.py check
+python backend/manage.py makemigrations --check --dry-run
 cd frontend
 npm run build
 npm audit
@@ -122,8 +120,8 @@ calls covering every status, past/upcoming appointments, contact ratings, and
 inbox messages with different read/replied states:
 
 ```
-python manage.py seed_demo
-python manage.py changepassword demo-agent
+python backend/manage.py seed_demo
+python backend/manage.py changepassword demo-agent
 ```
 
 Sign in as `demo-agent` using the password you set. A newly created demo user
@@ -140,7 +138,7 @@ docker compose exec portal python manage.py changepassword demo-agent
 To populate an existing, empty agent workspace instead:
 
 ```
-python manage.py seed_demo --username your-username
+python backend/manage.py seed_demo --username your-username
 ```
 
 The command preserves existing user credentials and agent/company associations.
