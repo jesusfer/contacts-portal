@@ -1060,7 +1060,7 @@ class MessagingExtensionManifestTests(SimpleTestCase):
             manifest["webApplicationInfo"],
             {
                 "id": "<TEAMS_SSO_APP_ID>",
-                "resource": "api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>",
+                "resource": "api://<PORTAL_HOST>/botid-<TEAMS_SSO_APP_ID>",
             },
         )
         self.assertEqual(manifest["id"], "<TEAMS_APP_ID>")
