@@ -27,14 +27,14 @@
     {
       "entityId": "contacts-portal",
       "name": "Gather",
-      "contentUrl": "https://<PORTAL_HOST>/teams/tab/?provider=<TEAMS_OIDC_PROVIDER_ID>",
+      "contentUrl": "https://<PORTAL_HOST>/teams/tabs/personal/?provider=<TEAMS_OIDC_PROVIDER_ID>",
       "websiteUrl": "https://<PORTAL_HOST>/",
       "scopes": ["personal"]
     }
   ],
   "configurableTabs": [
     {
-      "configurationUrl": "https://<PORTAL_HOST>/teams/config/",
+      "configurationUrl": "https://<PORTAL_HOST>/teams/tabs/shared/config/",
       "canUpdateConfiguration": true,
       "scopes": ["team", "groupChat"]
     }

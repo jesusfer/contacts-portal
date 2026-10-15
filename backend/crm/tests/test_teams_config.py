@@ -151,7 +151,11 @@ class TeamsFrameTests(SimpleTestCase):
         return TeamsFrameMiddleware(downstream)(request)
 
     def test_tab_has_restricted_frame_policy(self):
-        for path in ("/teams/tab/", "/teams/config/", "/teams/customer/"):
+        for path in (
+            "/teams/tabs/personal/",
+            "/teams/tabs/shared/config/",
+            "/teams/shared/customer/",
+        ):
             response = self.response(path)
             self.assertNotIn("X-Frame-Options", response)
             self.assertIn(
@@ -177,8 +181,12 @@ class TeamsFrameTests(SimpleTestCase):
 
     @override_settings(TEAMS_ENABLED=False)
     def test_disabled_teams_keep_frame_protection(self):
-        self.assertEqual(self.response("/teams/tab/")["X-Frame-Options"], "DENY")
-        self.assertEqual(self.response("/teams/customer/")["X-Frame-Options"], "DENY")
+        self.assertEqual(
+            self.response("/teams/tabs/personal/")["X-Frame-Options"], "DENY"
+        )
+        self.assertEqual(
+            self.response("/teams/shared/customer/")["X-Frame-Options"], "DENY"
+        )
 
 
 @override_settings(

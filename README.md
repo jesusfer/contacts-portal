@@ -243,10 +243,10 @@ then send it. No calls, appointments, inbox records, or Graph tokens are shared.
 
 ### Combined Teams app manifest and SSO
 
-The manifest includes the **Gather** personal static tab at `/teams/tab/`,
-configurable customer tabs for teams and group chats at `/teams/config/`, and
+The manifest includes the **Gather** personal static tab at `/teams/tabs/personal/`,
+configurable customer tabs for teams and group chats at `/teams/tabs/shared/config/`, and
 the customer search messaging extension. Tab configuration selects the provider
-and customer and saves a `/teams/customer/` content URL.
+and customer and saves a `/teams/shared/customer/` content URL.
 
 Replace every occurrence of these explicit placeholder variables before
 packaging; Teams does **not** substitute them automatically:

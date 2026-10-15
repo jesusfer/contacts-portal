@@ -4,7 +4,7 @@ Contacts Portal provides a personal tab and a configurable customer tab.
 
 ## Personal tab
 
-The personal tab opens at `/teams/tab/`. By default, it opens a Microsoft 365
+The personal tab opens at `/teams/tabs/personal/`. By default, it opens a Microsoft 365
 workspace without signing in to the CRM. Teams SSO verifies the user's Entra
 object ID and tenant ID. The Teams SDK then reads the user's profile, photo,
 calendar, Inbox, and presence from Microsoft Graph. It requests delegated
@@ -24,9 +24,9 @@ is available in either mode.
 
 ## Configurable customer tab
 
-The configuration page opens at `/teams/config/`. The user signs in with Teams
+The configuration page opens at `/teams/tabs/shared/config/`. The user signs in with Teams
 SSO, chooses one of the CRM customers linked to their Agent, then saves the tab.
-Teams stores the selected customer in the content URL at `/teams/customer/`.
+Teams stores the selected customer in the content URL at `/teams/shared/customer/`.
 
 Each viewer signs in and sees contacts for the selected customer and their own
 calls. The tab does not show another Agent's calls. The customer list and customer

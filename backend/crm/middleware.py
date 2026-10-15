@@ -13,7 +13,11 @@ class TeamsFrameMiddleware:
     def __call__(self, request):
         """Allow configured Teams tabs to be framed by Microsoft Teams hosts."""
         response = self.get_response(request)
-        is_tab = request.path in ("/teams/tab/", "/teams/config/", "/teams/customer/")
+        is_tab = request.path in (
+            "/teams/tabs/personal/",
+            "/teams/tabs/shared/config/",
+            "/teams/shared/customer/",
+        )
         if settings.TEAMS_ENABLED and is_tab:
             response.headers.pop("X-Frame-Options", None)
             policy = response.get("Content-Security-Policy", "")
