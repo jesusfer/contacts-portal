@@ -346,8 +346,9 @@ packaged preview and Adaptive Card templates; no select-item bot invoke is used.
 Queries accept 1–200 characters, cannot be whitespace-only, and return up to 25 contacts in
 name/ID order. All search words must match across the customer, contact name,
 or email. Refine the query if the desired contact is outside the first 25 results.
-The directory is shared, but call history is limited to the requesting agent's
-records for each contact. No other agents' calls, appointment notes, inbox data,
+Contacts are limited to the requesting agent's company memberships, and call
+history is limited to that agent's records for each contact. Agents without assigned
+companies receive no contacts. No other agents' calls, appointment notes, inbox data,
 credentials, or Graph tokens are returned. Responses are private and not cached.
 
 **Sending a card shares its contact details and call summaries with everyone in

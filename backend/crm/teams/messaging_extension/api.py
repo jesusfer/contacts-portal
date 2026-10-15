@@ -89,7 +89,9 @@ def search_contacts(request):
         return response(
             {"error": "query must contain between 1 and 200 characters."}, 400
         )
-    contacts = Contact.objects.select_related("company")
+    contacts = Contact.objects.filter(
+        company__in=agent.companies.all()
+    ).select_related("company")
     for term in queries[0].split():
         contacts = contacts.filter(
             Q(name__icontains=term)

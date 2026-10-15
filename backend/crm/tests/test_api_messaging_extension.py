@@ -68,6 +68,7 @@ class APIContactSearchTests(TestCase):
             extra_data={"id_token": {"oid": OID, "tid": TENANT}},
         )
         self.company = Company.objects.create(name="Acme")
+        self.agent.companies.add(self.company)
         self.contact = Contact.objects.create(
             name="Alice",
             email="alice@example.com",
@@ -207,7 +208,38 @@ class APIContactSearchTests(TestCase):
         )
         self.assertEqual(row["calls"].count("summary shortened"), 3)
 
-    def test_results_are_bounded_with_shared_directory_access(self):
+    def test_search_only_returns_contacts_from_assigned_companies(self):
+        other = Agent.objects.create(user=get_user_model().objects.create_user("other"))
+        other.companies.add(self.company)
+        assigned = Company.objects.create(name="Assigned")
+        self.agent.companies.add(assigned)
+        Contact.objects.create(name="Bob", email="bob@example.com", company=assigned)
+        unassigned = Company.objects.create(name="Unassigned")
+        private = Company.objects.create(name="Other agent")
+        other.companies.add(private)
+        for company in (unassigned, private):
+            contact = Contact.objects.create(
+                name="Alice", email="alice@example.com", company=company
+            )
+            Call.objects.create(agent=self.agent, contact=contact, summary="Old call")
+        contacts = self.search("alice acme").json()["contacts"]
+        self.assertEqual([contact["customer"] for contact in contacts], ["Acme"])
+        contacts = self.search("example.com").json()["contacts"]
+        self.assertEqual(
+            [contact["customer"] for contact in contacts], ["Acme", "Assigned"]
+        )
+        for query in ("Unassigned", "Other agent"):
+            with self.subTest(query=query):
+                self.assertEqual(self.search(query).json(), {"contacts": []})
+
+    def test_agent_without_assigned_companies_gets_no_contacts(self):
+        Call.objects.create(agent=self.agent, contact=self.contact)
+        self.agent.companies.clear()
+        result = self.search()
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json(), {"contacts": []})
+
+    def test_results_are_bounded_within_assigned_companies(self):
         Contact.objects.bulk_create(
             [
                 Contact(
@@ -218,7 +250,6 @@ class APIContactSearchTests(TestCase):
                 for index in range(RESULT_LIMIT + 5)
             ]
         )
-        self.assertFalse(self.agent.companies.exists())
         with self.assertNumQueries(4):
             contacts = self.search().json()["contacts"]
         self.assertEqual(len(contacts), RESULT_LIMIT)
