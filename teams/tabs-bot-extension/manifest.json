@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
   "manifestVersion": "1.30",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "id": "<TEAMS_APP_ID>",
   "developer": {
     "name": "Contacts Portal",
@@ -27,14 +27,14 @@
     {
       "entityId": "contacts-portal",
       "name": "Gather",
-      "contentUrl": "https://<PORTAL_HOST>/teams/tab/?provider=<TEAMS_OIDC_PROVIDER_ID>",
+      "contentUrl": "https://<PORTAL_HOST>/teams/tabs/personal/?provider=<TEAMS_OIDC_PROVIDER_ID>",
       "websiteUrl": "https://<PORTAL_HOST>/",
       "scopes": ["personal"]
     }
   ],
   "configurableTabs": [
     {
-      "configurationUrl": "https://<PORTAL_HOST>/teams/config/",
+      "configurationUrl": "https://<PORTAL_HOST>/teams/tabs/shared/config/",
       "canUpdateConfiguration": true,
       "scopes": ["team", "groupChat"]
     }

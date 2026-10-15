@@ -1045,12 +1045,13 @@ class MessagingExtensionManifestTests(SimpleTestCase):
         self.assertEqual(personal["scopes"], ["personal"])
         self.assertEqual(
             personal["contentUrl"],
-            "https://<PORTAL_HOST>/teams/tab/?provider=<TEAMS_OIDC_PROVIDER_ID>",
+            "https://<PORTAL_HOST>/teams/tabs/personal/?provider=<TEAMS_OIDC_PROVIDER_ID>",
         )
         self.assertEqual(personal["websiteUrl"], "https://<PORTAL_HOST>/")
         (configurable,) = manifest["configurableTabs"]
         self.assertEqual(
-            configurable["configurationUrl"], "https://<PORTAL_HOST>/teams/config/"
+            configurable["configurationUrl"],
+            "https://<PORTAL_HOST>/teams/tabs/shared/config/",
         )
         self.assertEqual(configurable["scopes"], ["team", "groupChat"])
         self.assertTrue(configurable["canUpdateConfiguration"])

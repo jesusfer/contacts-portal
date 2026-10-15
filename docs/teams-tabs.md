@@ -5,9 +5,13 @@ customer tab. Both are served by the portal; there is no separate tab server.
 
 ## Personal tab
 
-The personal tab opens at `/teams/tab/`. Its default startup mode is Graph-only:
-the user can read their own Microsoft 365 profile, photo, calendar, Inbox, and
-presence without signing in to the CRM. The server validates the signed Teams
+The personal tab opens at `/teams/tabs/personal/`. By default, it opens a Microsoft 365
+workspace without signing in to the CRM. Teams SSO verifies the user's Entra
+object ID and tenant ID. The Teams SDK then reads the user's profile, photo,
+calendar, Inbox, and presence from Microsoft Graph. It requests delegated
+`User.Read`, `Calendars.Read`, `Mail.Read`, and `Presence.Read` permissions.
+
+It does not sign in to the CRM. The server validates the signed Teams
 SSO token at `/api/teams/identity/` and returns the verified Entra object and
 tenant IDs. This identity-only request does not create a Django session, look
 up a CRM account, perform OBO, or call Graph from Django.
@@ -86,6 +90,22 @@ unverified user ID from Teams context. Portal SSO tokens are for the portal API
 and are never sent to Graph. Graph consent or identity failures are shown to the
 user; SDK Graph reads do not fall back to Django Graph reads after SDK startup.
 
+## Configurable customer tab
+
+The configuration page opens at `/teams/config/`. It always uses Teams SSO to
+create a CRM session, regardless of `TEAMS_GRAPH_ONLY`. The user selects one of
+the customers (companies) linked to their Agent, then saves. Existing selections
+are restored when the tab is reconfigured; Save is enabled only after a customer
+is selected and the server validates it.
+
+Teams stores the selection in a content URL such as
+`/teams/customer/?provider=<provider-id>&customer=<company-id>`. Each viewer
+must sign in through Teams SSO for the same provider. The customer selection is
+shared, but each viewer sees their own calls, never another Agent's calls.
+Customer-list and customer-detail APIs require an authenticated Agent and a
+matching Teams SSO provider session. Refresh reloads CRM data. An unknown or
+deleted customer shows an error rather than exposing the full directory.
+
 ## Graph data and CRM data
 
 Teams tabs use `@microsoft/teams.client` and
@@ -105,22 +125,6 @@ presence; errors display an unknown status.
 Graph calendar, Inbox, and profile data are separate from CRM calls, appointment
 scheduling, KPIs, companies, and contacts, which remain local portal data.
 Graph data is not imported into the CRM database.
-
-## Configurable customer tab
-
-The configuration page opens at `/teams/config/`. It always uses Teams SSO to
-create a CRM session, regardless of `TEAMS_GRAPH_ONLY`. The user selects one of
-the customers (companies) linked to their Agent, then saves. Existing selections
-are restored when the tab is reconfigured; Save is enabled only after a customer
-is selected and the server validates it.
-
-Teams stores the selection in a content URL such as
-`/teams/customer/?provider=<provider-id>&customer=<company-id>`. Each viewer
-must sign in through Teams SSO for the same provider. The customer selection is
-shared, but each viewer sees their own calls, never another Agent's calls.
-Customer-list and customer-detail APIs require an authenticated Agent and a
-matching Teams SSO provider session. Refresh reloads CRM data. An unknown or
-deleted customer shows an error rather than exposing the full directory.
 
 ## Graph implementation boundary
 

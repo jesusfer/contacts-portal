@@ -10,9 +10,9 @@ export function App() {
     <AppRoutes
       workspace={<WorkspaceApp />}
       pages={{
-        '/teams/config/': TeamsConfig,
-        '/teams/customer/': TeamsCustomerTab,
-        '/teams/tab/': TeamsTab,
+        '/teams/tabs/shared/config/': TeamsConfig,
+        '/teams/tabs/shared/customer/': TeamsCustomerTab,
+        '/teams/tabs/personal/': TeamsTab,
       }}
     />
   )
