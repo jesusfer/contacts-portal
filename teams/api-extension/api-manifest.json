@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
   "manifestVersion": "1.30",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "id": "<TEAMS_API_APP_ID>",
   "developer": {
     "name": "Contacts Portal",
@@ -55,6 +55,6 @@
   "validDomains": ["<PORTAL_HOST>"],
   "webApplicationInfo": {
     "id": "<TEAMS_SSO_APP_ID>",
-    "resource": "api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>"
+    "resource": "api://<PORTAL_HOST>/botid-<TEAMS_SSO_APP_ID>"
   }
 }
