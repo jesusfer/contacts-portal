@@ -581,7 +581,7 @@ class GraphClientTests(SimpleTestCase):
                         "isRead": True,
                     }
                 ],
-                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skip=25",
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
             }
         )
         result = self.graph.get_mailbox_messages()
@@ -610,7 +610,7 @@ class GraphClientTests(SimpleTestCase):
         get.return_value = response(
             {
                 "value": [],
-                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skiptoken=opaque",
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skiptoken=opaque",
             }
         )
         page = self.graph.get_mailbox_messages()["next_page"]
@@ -686,14 +686,14 @@ class GraphClientTests(SimpleTestCase):
     @patch("crm.graph.requests.get")
     def test_pagination_links_cannot_redirect_to_arbitrary_urls_or_resources(self, get):
         for link in (
-            "https://evil.example.com/v1.0/me/mailFolders/inbox/messages?$skip=25",
-            "https://graph.microsoft.com@evil.example.com/v1.0/me/mailFolders/inbox/messages?$skip=25",
-            "http://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skip=25",
+            "https://evil.example.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
+            "https://graph.microsoft.com@evil.example.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
+            "http://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
             "https://graph.microsoft.com/v1.0/users/other/messages?$skip=25",
-            "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skip=25&redirect=evil",
-            "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skip=25&$skip=50",
-            "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skip=25#fragment",
-            "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skip=25&$top=1000",
+            "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25&redirect=evil",
+            "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25&$skip=50",
+            "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25#fragment",
+            "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25&$top=1000",
         ):
             with self.subTest(link=link):
                 get.return_value = response({"value": [], "@odata.nextLink": link})
@@ -701,7 +701,7 @@ class GraphClientTests(SimpleTestCase):
                     self.graph.get_mailbox_messages()
                 self.assertEqual(
                     get.call_args.args[0],
-                    "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages",
+                    "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages",
                 )
 
     @patch("crm.graph.requests.get")
@@ -1051,7 +1051,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         get.return_value = response(
             {
                 "value": [],
-                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$skip=25",
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
             }
         )
         page = self.client.get("/api/graph/inbox/").json()["next_page"]

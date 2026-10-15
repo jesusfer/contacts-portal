@@ -50,7 +50,7 @@ class _GraphTransport(httpx.AsyncBaseTransport):
                 "/v1.0/me",
                 "/v1.0/me/photo/$value",
                 "/v1.0/me/calendarView",
-                "/v1.0/me/mailFolders/inbox/messages",
+                "/v1.0/me/mailFolders('inbox')/messages",
                 "/v1.0/me/presence",
             }
             or url.fragment
@@ -106,7 +106,7 @@ class GraphClient:
                 "/me": graph.me,
                 "/me/photo/$value": graph.me.photo.content,
                 "/me/calendarView": graph.me.calendar_view,
-                "/me/mailFolders/inbox/messages": graph.me.mail_folders.by_mail_folder_id(
+                "/me/mailFolders('inbox')/messages": graph.me.mail_folders.by_mail_folder_id(
                     "inbox"
                 ).messages,
                 "/me/presence": graph.me.presence,
@@ -301,7 +301,7 @@ class GraphClient:
             "$top": str(top),
         }
         values, next_page = self._page(
-            "inbox", "/me/mailFolders/inbox/messages", params, page
+            "inbox", "/me/mailFolders('inbox')/messages", params, page
         )
         emails = []
         for message in values:

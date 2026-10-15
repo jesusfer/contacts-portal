@@ -152,7 +152,7 @@ class ExternalCallLoggingTests(SimpleTestCase):
         for endpoint in (
             "/me",
             "/me/calendarView",
-            "/me/mailFolders/inbox/messages",
+            "/me/mailFolders('inbox')/messages",
             "/me/presence",
         ):
             with self.subTest(endpoint=endpoint):

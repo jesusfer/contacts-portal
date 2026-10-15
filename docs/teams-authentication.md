@@ -24,7 +24,7 @@ requests are read-only `GET` requests.
 | Profile view: `/me` | SDK calls Graph directly after initialization | Django calls Graph through `/api/profile/` or `/api/graph/profile/` |
 | Profile photo: `/me/photo/$value` | SDK HTTP client retrieves a blob directly; the UI uses a temporary object URL | Django proxies it through `/api/graph/picture/` |
 | Calendar: `/me/calendarView` | SDK calls Graph directly, including subsequent pages | Django calls Graph through `/api/graph/calendar/` |
-| Inbox: `/me/mailFolders/inbox/messages` | SDK calls Graph directly, including subsequent pages | Django calls Graph through `/api/graph/inbox/` |
+| Inbox: `/me/mailFolders('inbox')/messages` | SDK calls Graph directly, including subsequent pages | Django calls Graph through `/api/graph/inbox/` |
 | Presence: `/me/presence` | SDK calls Graph directly on the polling schedule | Django calls Graph through `/api/graph/presence/` |
 | Session response profile: `/me` | Only the full dashboard requests Django session responses; Graph-only startup does not | Django reads Graph when generating session responses |
 | Token-renewal identity check: `/me` | Django checks the stored object ID during server token renewal, when recorded | Same server-side behavior |
@@ -100,13 +100,9 @@ public configuration endpoint exposes no client secret or token.
 
 After Teams token validation, the tab starts a tenant-bound
 `@microsoft/teams.client` app using the four delegated read scopes. SDK/MSAL
-uses **nested app authentication (NAA)** on supported Teams hosts: the embedded
-app obtains its own delegated Entra token using the signed-in Teams host's
-account context, rather than asking the user to sign in again. NAA still
-respects the app's configured scopes and consent; when silent consent is
-unavailable, the tab can request an interactive token through an MSAL popup
-and set the returned active account. See Microsoft's
-[NAA overview](https://learn.microsoft.com/en-us/microsoftteams/platform/concepts/authentication/nested-authentication).
+uses nested app authentication on supported Teams hosts. When silent consent
+is unavailable, the tab can request an interactive token through an MSAL popup
+and set the returned active account.
 
 The SDK calls Graph `/me?$select=id` directly and compares it with the verified
 Teams identity before exposing any views. Later tab Graph requests use
