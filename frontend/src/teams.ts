@@ -139,7 +139,7 @@ export async function registerTeamsConfigHandler(getSelection) {
       if (current?.provider?.id !== provider.id || current?.customer?.id !== customer.id) {
         throw new Error('The selection changed. Save the tab again.')
       }
-      const contentUrl = `${window.location.origin}/teams/shared/customer/?provider=${encodeURIComponent(provider.id)}&customer=${encodeURIComponent(customer.id)}`
+      const contentUrl = `${window.location.origin}/teams/tabs/shared/customer/?provider=${encodeURIComponent(provider.id)}&customer=${encodeURIComponent(customer.id)}`
       await pages.config.setConfig({
         entityId: `gather-customer-${provider.id}-${customer.id}`,
         contentUrl,

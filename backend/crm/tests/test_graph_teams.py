@@ -59,7 +59,7 @@ import {{ readFileSync }} from 'node:fs'
 import ts from {json.dumps(str(compiler))}
 globalThis.window = {{ location: {{ origin: 'https://portal.example.com' }} }}
 let save, saved, valid, selection, failure, success
-const previous = {{ contentUrl: 'https://portal.example.com/teams/shared/customer/?provider=entraid-work&customer=42' }}
+const previous = {{ contentUrl: 'https://portal.example.com/teams/tabs/shared/customer/?provider=entraid-work&customer=42' }}
 globalThis.sdkMock = {{
   app: {{ initialize: async () => {{}} }},
   pages: {{

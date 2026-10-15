@@ -11,7 +11,7 @@ export function App() {
       workspace={<WorkspaceApp />}
       pages={{
         '/teams/tabs/shared/config/': TeamsConfig,
-        '/teams/shared/customer/': TeamsCustomerTab,
+        '/teams/tabs/shared/customer/': TeamsCustomerTab,
         '/teams/tabs/personal/': TeamsTab,
       }}
     />

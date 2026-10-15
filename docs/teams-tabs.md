@@ -26,7 +26,8 @@ is available in either mode.
 
 The configuration page opens at `/teams/tabs/shared/config/`. The user signs in with Teams
 SSO, chooses one of the CRM customers linked to their Agent, then saves the tab.
-Teams stores the selected customer in the content URL at `/teams/shared/customer/`.
+Teams stores the selected customer in the content URL at
+`/teams/tabs/shared/customer/`.
 
 Each viewer signs in and sees contacts for the selected customer and their own
 calls. The tab does not show another Agent's calls. The customer list and customer

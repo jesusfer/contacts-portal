@@ -16,7 +16,7 @@ class TeamsFrameMiddleware:
         is_tab = request.path in (
             "/teams/tabs/personal/",
             "/teams/tabs/shared/config/",
-            "/teams/shared/customer/",
+            "/teams/tabs/shared/customer/",
         )
         if settings.TEAMS_ENABLED and is_tab:
             response.headers.pop("X-Frame-Options", None)

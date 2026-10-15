@@ -154,7 +154,7 @@ class TeamsFrameTests(SimpleTestCase):
         for path in (
             "/teams/tabs/personal/",
             "/teams/tabs/shared/config/",
-            "/teams/shared/customer/",
+            "/teams/tabs/shared/customer/",
         ):
             response = self.response(path)
             self.assertNotIn("X-Frame-Options", response)
@@ -185,7 +185,7 @@ class TeamsFrameTests(SimpleTestCase):
             self.response("/teams/tabs/personal/")["X-Frame-Options"], "DENY"
         )
         self.assertEqual(
-            self.response("/teams/shared/customer/")["X-Frame-Options"], "DENY"
+            self.response("/teams/tabs/shared/customer/")["X-Frame-Options"], "DENY"
         )
 
 
