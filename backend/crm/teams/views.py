@@ -149,7 +149,7 @@ def _teams_auth(request, *, graph_only=False):
         token = exchange_graph_token(
             app, assertion=data["token"], tenant_id=tenant, token_cache=token_cache
         )
-        profile_data = GraphClient(token["access_token"], tenant).get_profile()
+        profile_data = GraphClient(token["access_token"]).get_profile()
         if profile_data.get("id") != claims["oid"]:
             raise TeamsTokenError("Graph identity does not match the Teams identity.")
         login(

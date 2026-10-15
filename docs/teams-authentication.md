@@ -23,17 +23,17 @@ requests are read-only `GET` requests.
 | SDK identity check: `/me?$select=id` | SDK calls Graph directly and compares the ID with the verified server identity | Not used |
 | Profile view: `/me` | SDK calls Graph directly after initialization | Django calls Graph through `/api/profile/` or `/api/graph/profile/` |
 | Profile photo: `/me/photo/$value` | SDK HTTP client retrieves a blob directly; the UI uses a temporary object URL | Django proxies it through `/api/graph/picture/` |
-| Calendar: `/me/calendarView` | SDK calls Graph directly, including subsequent pages | Django calls Graph through `/api/graph/calendar/` |
-| Inbox: `/me/mailFolders('inbox')/messages` | SDK calls Graph directly, including subsequent pages | Django calls Graph through `/api/graph/inbox/` |
+| Calendar: `/me/calendarView` | SDK calls Graph directly for up to five events | Django calls Graph through `/api/graph/calendar/` for up to five events |
+| Inbox: `/me/mailFolders/inbox/messages` | SDK calls Graph directly for the five latest messages | Django calls Graph through `/api/graph/inbox/` for the five latest messages |
 | Presence: `/me/presence` | SDK calls Graph directly on the polling schedule | Django calls Graph through `/api/graph/presence/` |
 | Session response profile: `/me` | Only the full dashboard requests Django session responses; Graph-only startup does not | Django reads Graph when generating session responses |
 | Token-renewal identity check: `/me` | Django checks the stored object ID during server token renewal, when recorded | Same server-side behavior |
 
 After Teams SDK initialization, the frontend request helper routes Graph/profile
-reads through `app.graph.call(...)`. Photo and pagination requests use the SDK's
+reads through `app.graph.call(...)`. Photo requests use the SDK's
 authenticated `app.graph.http` client. These UI reads do not pass through
-Django's Graph endpoints. Pagination parameters are checked and applied to
-fixed Graph paths. The full dashboard still uses Django session/profile
+Django's Graph endpoints. Calendar and inbox are five-item previews: next links
+are ignored and there are no page cursors or load-more controls. The full dashboard still uses Django session/profile
 responses, which use the server-side Graph client; Graph-only startup never
 requests those responses. Profile data in the portal session remains
 server-derived.
@@ -163,12 +163,13 @@ error-handling migration. SDK activity unions also impose additional required
 fields and known-invoke discriminators, while the current channel parser
 preserves existing malformed-request and unsupported-invoke behavior.
 
-`microsoft-teams-graph` supplies the delegated `AuthProvider` and Graph request
-builders for profile, photo, calendar, Inbox, and presence. The custom transport
-retains the portal's fixed Graph destinations, read-only methods, ten-second
-timeout, disabled redirects, and metadata-only external-call logging. A Kiota
-response handler leaves JSON validation, response normalization, and signed,
-identity-bound pagination in the portal.
+`microsoft-teams-graph` supplies the delegated `AuthProvider`; `msgraph-sdk`
+supplies request builders and response models for profile, photo, calendar,
+inbox, and presence. The SDK uses native HTTPX with its standard middleware,
+a ten-second timeout, and disabled retries and redirects. HTTPX event hooks
+preserve metadata-only external-call logging through `crm.external_calls`.
+A thin adapter maps SDK errors and normalizes responses for the UI.
+Calendar and inbox request only five items and never follow `@odata.nextLink`.
 
 MSAL Python handles confidential-client OBO and token renewal. It does not
 validate incoming portal access tokens. Teams SSO verifies signatures and

@@ -2,6 +2,7 @@ import json
 from unittest.mock import Mock, patch
 
 import requests
+import httpx
 from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount import app_settings
 from django.core.cache import cache
@@ -146,40 +147,37 @@ class ExternalCallLoggingTests(SimpleTestCase):
                 method="GET",
             )
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_graph_requests_and_photos_are_traced_without_changing_behavior(self, get):
         client = GraphClient("access-secret")
-        for endpoint in (
-            "/me",
-            "/me/calendarView",
-            "/me/mailFolders('inbox')/messages",
-            "/me/presence",
+        from django.utils import timezone
+
+        for operation, endpoint, data in (
+            (client.get_profile, "/me", {"id": "private-user"}),
+            (lambda: client.get_calendar_view(timezone.now(), timezone.now()), "/me/calendarView", {"value": []}),
+            (client.get_mailbox_messages, "/me/mailFolders/inbox/messages", {"value": []}),
+            (client.get_presence, "/me/presence", {}),
         ):
             with self.subTest(endpoint=endpoint):
-                get.return_value = self.response()
+                get.return_value = httpx.Response(
+                    200, json={**data, "@odata.nextLink": "cursor-secret"}
+                )
                 with self.assertLogs("crm.external_calls") as logs:
-                    client._request(endpoint, {"$skiptoken": "cursor-secret"})
+                    operation()
                 self.assertIn(f"operation={endpoint}", logs.output[-1])
                 self.assertNotIn("cursor-secret", "\n".join(logs.output))
                 self.assertNotIn("access-secret", "\n".join(logs.output))
-                self.assertEqual(get.call_args.kwargs["timeout"], 10)
-                self.assertFalse(get.call_args.kwargs["allow_redirects"])
+                self.assertNotIn("private-user", "\n".join(logs.output))
+                self.assertTrue(all(value == 10 for value in get.call_args.args[0].extensions["timeout"].values()))
         for status, expected in ((200, bytes), (404, type(None))):
             with self.subTest(photo_status=status):
-                get.return_value = self.response(status)
+                get.return_value = httpx.Response(status, content=b"photo-secret")
                 with self.assertLogs("crm.external_calls") as logs:
                     self.assertIsInstance(client.get_photo(), expected)
                 self.assertIn("operation=/me/photo/$value", logs.output[-1])
                 self.assertIn(f"status={status}", logs.output[-1])
-        get.reset_mock()
-        with (
-            self.assertNoLogs("crm.external_calls"),
-            self.assertRaises(GraphClientError),
-        ):
-            client._request("/users/private-person")
-        get.assert_not_called()
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_graph_errors_keep_existing_public_exceptions(self, get):
         for status, error in (
             (401, TokenExpiredError),
@@ -190,17 +188,21 @@ class ExternalCallLoggingTests(SimpleTestCase):
                 self.subTest(status=status),
                 self.assertLogs("crm.external_calls") as logs,
             ):
-                get.return_value = self.response(status)
+                get.return_value = httpx.Response(status, json={"error": {"message": "response-secret"}})
                 with self.assertRaises(error):
                     GraphClient("access-secret").get_presence()
                 self.assertIn(f"status={status}", logs.output[-1])
-        get.side_effect = requests.Timeout("exception-secret")
+        async def timeout(request):
+            raise httpx.ReadTimeout("exception-secret", request=request)
+
+        get.side_effect = timeout
         with (
             self.assertLogs("crm.external_calls") as logs,
             self.assertRaises(GraphClientError),
         ):
             GraphClient("access-secret").get_photo()
         self.assertNotIn("exception-secret", "\n".join(logs.output))
+        self.assertIn("external_call.failed", logs.output[-1])
 
     @patch("crm.teams.auth.requests.post")
     @patch("crm.teams.auth.requests.get")

@@ -63,35 +63,6 @@ export function teamsGraphActive() {
 }
 
 /**
- * Validate a Graph pagination link and merge its paging values with fixed query
- * parameters.
- * @param {string} link The Graph-provided next-page URL.
- * @param {string} endpoint The expected Graph endpoint path.
- * @param {Record<string, string>} params Original fixed query parameters.
- * @returns {Record<string, string>} Query parameters for the next page.
- * @throws {Error} If the URL is not a valid page link for the expected request.
- */
-export function graphPageQuery(link, endpoint, params) {
-  const url = new URL(link)
-  const query = Object.fromEntries(url.searchParams)
-  if (
-    url.origin !== 'https://graph.microsoft.com' ||
-    url.username ||
-    url.password ||
-    url.pathname !== `/v1.0${endpoint}` ||
-    url.hash ||
-    url.searchParams.size !== Object.keys(query).length ||
-    !('$skip' in query || '$skiptoken' in query) ||
-    Object.keys(query).some((key) => !(key in params) && !['$skip', '$skiptoken'].includes(key)) ||
-    Object.values(query).some((value) => value.length > 8192) ||
-    Object.entries(params).some(([key, value]) => key in query && query[key] !== String(value))
-  ) {
-    throw new Error('Invalid Microsoft Graph pagination link.')
-  }
-  return { ...params, ...query }
-}
-
-/**
  * Convert a Microsoft Graph UTC date-time object to an ISO timestamp.
  * @param {{dateTime?: string, timeZone?: string}} value Graph date-time value.
  * @returns {string} The date and time as an ISO timestamp.
@@ -108,7 +79,7 @@ function eventTime(value) {
 
 /**
  * Run a supported read-only Graph request through the active Teams client.
- * Supports presence, profile, calendar, and inbox data, with validated paging.
+ * Supports presence, profile, and previews of up to five events or messages.
  * @param {string} path Internal Graph request path and query string.
  * @param {{signal?: AbortSignal}} [options] Optional request cancellation signal.
  * @returns {Promise<object>} A normalized profile, presence, event, or email result.
@@ -151,7 +122,7 @@ export async function teamsGraphRequest(path: string, { signal }: { signal?: Abo
       endDateTime: url.searchParams.get('end'),
       $select: 'id,subject,bodyPreview,start,end,location,webLink,onlineMeetingUrl',
       $orderby: 'start/dateTime asc',
-      $top: '50',
+      $top: '5',
     }
     operation = me.calendarView.get
   } else if (url.pathname === '/graph/inbox/') {
@@ -165,18 +136,11 @@ export async function teamsGraphRequest(path: string, { signal }: { signal?: Abo
   } else {
     throw new Error('Unsupported Microsoft Graph request.')
   }
-  const page = url.searchParams.get('page')
-  const query = page ? graphPageQuery(page, endpoint, params) : params
-  // The generated endpoint does not expose $skiptoken; keep pagination on the validated fixed path.
-  const data = page
-    ? (await app.graph.http.get(endpoint, { ...options.requestConfig, params: query })).data
-    : await app.graph.call(operation, { ...params, 'mailFolder-id': 'inbox' }, options)
+  const data = await app.graph.call(operation, { ...params, 'mailFolder-id': 'inbox' }, options)
   if (!Array.isArray(data.value)) throw new Error('Invalid Microsoft Graph response.')
-  const next = data['@odata.nextLink'] || null
-  if (next) graphPageQuery(next, endpoint, params)
   if (endpoint === '/me/calendarView')
     return {
-      events: data.value.map((event) => ({
+      events: data.value.slice(0, 5).map((event) => ({
         id: event.id,
         subject: event.subject || '',
         body_preview: event.bodyPreview || '',
@@ -186,10 +150,9 @@ export async function teamsGraphRequest(path: string, { signal }: { signal?: Abo
         web_url: event.webLink,
         online_meeting_url: event.onlineMeetingUrl,
       })),
-      next_page: next,
     }
   return {
-    emails: data.value.map((message) => {
+    emails: data.value.slice(0, 5).map((message) => {
       const body = message.body || {}
       const text =
         body.contentType?.toLowerCase() === 'html'
@@ -209,7 +172,6 @@ export async function teamsGraphRequest(path: string, { signal }: { signal?: Abo
         web_url: message.webLink,
       }
     }),
-    next_page: next,
   }
 }
 

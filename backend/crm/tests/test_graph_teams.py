@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import jwt
+import httpx
 import msal
 from allauth.account.signals import user_logged_in as allauth_user_logged_in
 from allauth.socialaccount.adapter import get_adapter
@@ -16,7 +17,6 @@ from allauth.socialaccount.providers.oauth2.client import OAuth2Error
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.core import signing
 from django.test import (
     Client,
     RequestFactory,
@@ -29,7 +29,7 @@ from django.utils import timezone
 
 from config.settings import configure_oidc
 from config.urls import urlpatterns as project_patterns
-from ..graph import GraphClient, GraphClientError, InvalidCursor, TokenExpiredError
+from ..graph import GraphClient, GraphClientError, TokenExpiredError
 from ..signals import AUTH_SOURCE_SESSION_KEY
 from ..models import UserProfile
 from ..openid_connect import TenantAwareOpenIDConnectOAuth2Adapter
@@ -56,7 +56,7 @@ class TeamsGraphFrontendTests(SimpleTestCase):
                 f"""
 import assert from 'node:assert/strict'
 import {{ readFileSync }} from 'node:fs'
-import ts from {json.dumps(str(compiler))}
+import ts from {json.dumps(compiler.as_uri())}
 globalThis.window = {{ location: {{ origin: 'https://portal.example.com' }} }}
 let save, saved, valid, selection, failure, success
 const previous = {{ contentUrl: 'https://portal.example.com/teams/tabs/shared/customer/?provider=entraid-work&customer=42' }}
@@ -133,7 +133,7 @@ assert.match(failure, /selection changed/)
                 f"""
 import assert from 'node:assert/strict'
 import {{ readFileSync }} from 'node:fs'
-import ts from {json.dumps(str(compiler))}
+import ts from {json.dumps(compiler.as_uri())}
 globalThis.window = {{ location: {{ origin: 'https://portal.example.com' }} }}
 globalThis.document = {{ cookie: 'csrftoken=csrf-test' }}
 let account = {{ tenantId: 'tenant' }}
@@ -191,7 +191,7 @@ for (const {{ options }} of requests) {{
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_sdk_pagination_restricts_destinations_and_preserves_query(self):
+    def test_sdk_previews_limit_items_and_ignore_pagination(self):
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is required for frontend validation.")
@@ -207,23 +207,51 @@ for (const {{ options }} of requests) {{
                 f"""
 import assert from 'node:assert/strict'
 import {{ readFileSync }} from 'node:fs'
-import ts from {json.dumps(str(compiler))}
+import ts from {json.dumps(compiler.as_uri())}
+globalThis.window = {{ location: {{ origin: 'https://portal.example.com' }} }}
+let calls = []
+const calendar = {{}}, inbox = {{}}
+class App {{
+  constructor() {{
+    this.msalInstance = {{
+      acquireTokenSilent: async () => ({{ account: {{ tenantId: 'tenant' }} }}),
+      setActiveAccount: () => {{}},
+    }}
+    this.graph = {{
+      call: async (operation, params, options) => {{
+        if (operation === globalThis.meMock.get) return {{ id: 'object' }}
+        calls.push({{ operation, params, options }})
+        const item = operation === calendar
+          ? {{ id: 'event', start: {{ dateTime: '2026-10-10T10:00:00', timeZone: 'UTC' }}, end: {{ dateTime: '2026-10-10T11:00:00', timeZone: 'UTC' }} }}
+          : {{ id: 'mail', body: {{ content: 'Preview', contentType: 'text' }} }}
+        return {{ value: Array.from({{ length: 8 }}, (_, i) => ({{ ...item, id: String(i) }})), '@odata.nextLink': 'not-a-url' }}
+      }},
+    }}
+  }}
+  async start() {{}}
+}}
+globalThis.sdkMock = {{ App }}
+globalThis.meMock = {{ get: {{}}, calendarView: {{ get: calendar }}, mailFolders: {{ messages: {{ list: inbox }} }} }}
 const code = ts.transpileModule(readFileSync({json.dumps(str(source / "teams-graph.ts"))}, 'utf8'), {{ compilerOptions: {{ module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }} }}).outputText
-const {{ graphPageQuery, clearTeamsGraph, teamsGraphActive, teamsGraphRequest }} = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))
-const endpoint = '/me/calendarView'
-const params = {{ startDateTime: '2026-10-01T00:00:00Z', $top: '50' }}
-const link = 'https://graph.microsoft.com/v1.0/me/calendarView?$skiptoken=next'
-assert.deepEqual(graphPageQuery(link, endpoint, params), {{ ...params, $skiptoken: 'next' }})
-for (const invalid of [
-  link.replace('graph.microsoft.com', 'evil.example'),
-  link.replace('https:', 'http:'),
-  link.replace('/me/calendarView', '/users/other/calendarView'),
-  link + '&startDateTime=other',
-  link + '&$skiptoken=duplicate',
-  link + '&unexpected=value',
-  link + '#fragment',
-  link.replace('graph.microsoft.com', 'user@graph.microsoft.com'),
-]) assert.throws(() => graphPageQuery(invalid, endpoint, params))
+  .replace("import('@microsoft/teams.client')", 'Promise.resolve(globalThis.sdkMock)')
+  .replace("import('@microsoft/teams.graph-endpoints/me')", 'Promise.resolve(globalThis.meMock)')
+const {{ startTeamsGraph, clearTeamsGraph, teamsGraphActive, teamsGraphRequest }} = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'))
+await startTeamsGraph({{ client_id: 'client', tenant_id: 'tenant' }}, 'object')
+for (const [path, field, operation] of [
+  ['graph/calendar/?start=2026-10-01T00:00:00Z&end=2026-11-01T00:00:00Z', 'events', calendar],
+  ['graph/inbox/', 'emails', inbox],
+]) {{
+  const result = await teamsGraphRequest(path + (path.includes('?') ? '&' : '?') + 'page=https://evil.example')
+  assert.deepEqual(Object.keys(result), [field])
+  assert.equal(result[field].length, 5)
+  const call = calls.at(-1)
+  assert.equal(call.operation, operation)
+  assert.equal(call.params.$top, '5')
+  assert.equal(call.params.$skip, undefined)
+  assert.equal(call.params.$skiptoken, undefined)
+  assert.equal(call.options.requestConfig.timeout, 10000)
+}}
+assert.equal(calls.length, 2)
 clearTeamsGraph()
 assert.equal(teamsGraphActive(), false)
 await assert.rejects(teamsGraphRequest('graph/inbox/'), /not initialized/)
@@ -275,7 +303,9 @@ PROFILE = {
 
 
 def response(data=None, status=200, content=b""):
-    return Mock(status_code=status, content=content, json=Mock(return_value=data))
+    if content:
+        return httpx.Response(status, content=content)
+    return httpx.Response(status, json=data)
 
 
 def verified_callback(request, provider_id, process):
@@ -518,20 +548,20 @@ class TenantAwareOIDCTests(SimpleTestCase):
 
 class GraphClientTests(SimpleTestCase):
     def setUp(self):
-        self.graph = GraphClient("graph-access", tenant_id=TENANT)
+        self.graph = GraphClient("graph-access")
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_profile_authorization_and_fixed_endpoint(self, get):
         get.return_value = response(PROFILE)
         self.assertEqual(self.graph.get_profile(), PROFILE)
-        self.assertEqual(get.call_args.args[0], "https://graph.microsoft.com/v1.0/me")
+        request = get.call_args.args[0]
+        self.assertEqual(str(request.url.copy_with(query=None)), "https://graph.microsoft.com/v1.0/me")
         self.assertEqual(
-            get.call_args.kwargs["headers"]["Authorization"], "Bearer " + "graph-access"
+            request.headers["Authorization"], "Bearer " + "graph-access"
         )
-        self.assertIs(get.call_args.kwargs["allow_redirects"], False)
-        self.assertIn("givenName", get.call_args.kwargs["params"]["$select"])
+        self.assertIn("givenName", request.url.params["$select"])
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_errors_and_redirects_are_sanitized(self, get):
         for status in (302, 401, 403, 429, 500):
             with self.subTest(status=status):
@@ -544,26 +574,43 @@ class GraphClientTests(SimpleTestCase):
                 self.assertEqual(
                     caught.exception.status, 403 if status in (401, 403) else 502
                 )
-        get.return_value = response([])
+        get.return_value = httpx.Response(200, content=b"invalid-json", headers={"Content-Type": "application/json"})
         with self.assertRaises(GraphClientError):
             self.graph.get_profile()
+        for payload in ([], {}):
+            with self.subTest(payload=payload):
+                get.return_value = response(payload)
+                with self.assertRaises(GraphClientError):
+                    self.graph.get_profile()
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
+    def test_missing_collections_do_not_look_like_empty_previews(self, get):
+        start = timezone.now()
+        for operation in (
+            self.graph.get_mailbox_messages,
+            lambda: self.graph.get_calendar_view(start, start + timedelta(days=1)),
+        ):
+            for payload in ({}, {"value": None}):
+                with self.subTest(payload=payload, operation=operation):
+                    get.return_value = response(payload)
+                    with self.assertRaises(GraphClientError):
+                        operation()
+
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_photo_bytes_missing_and_redirect(self, get):
         get.return_value = response(content=b"\xff\xd8\x00\xff")
         self.assertEqual(self.graph.get_photo(), b"\xff\xd8\x00\xff")
         self.assertEqual(
-            get.call_args.kwargs["headers"]["Authorization"], "Bearer " + "graph-access"
+            get.call_args.args[0].headers["Authorization"], "Bearer " + "graph-access"
         )
-        self.assertIs(get.call_args.kwargs["allow_redirects"], False)
         get.return_value = response(status=404)
         self.assertIsNone(self.graph.get_photo())
         get.return_value = response(status=302)
         with self.assertRaises(GraphClientError):
             self.graph.get_photo()
 
-    @patch("crm.graph.requests.get")
-    def test_inbox_schema_body_and_signed_pagination(self, get):
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
+    def test_inbox_schema_body_and_five_item_preview(self, get):
         get.return_value = response(
             {
                 "value": [
@@ -580,8 +627,8 @@ class GraphClientTests(SimpleTestCase):
                         "receivedDateTime": "2026-10-10T12:00:00Z",
                         "isRead": True,
                     }
-                ],
-                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
+                ] * 8,
+                "@odata.nextLink": "not-a-url",
             }
         )
         result = self.graph.get_mailbox_messages()
@@ -590,80 +637,24 @@ class GraphClientTests(SimpleTestCase):
             {"name": "Sender", "email": "sender@example.com"},
         )
         self.assertEqual(result["emails"][0]["body"], "Full message")
-        self.assertNotIn("https://", result["next_page"])
-        self.assertNotIn("access", result["next_page"])
+        self.assertEqual(len(result["emails"]), 5)
+        self.assertEqual(set(result), {"emails"})
+        request = get.call_args.args[0]
+        self.assertEqual(request.url.params["$top"], "5")
         self.assertIn(
             'outlook.body-content-type="text"',
-            get.call_args.kwargs["headers"]["Prefer"],
+            request.headers["Prefer"],
         )
-        page = result["next_page"]
+        get.assert_called_once()
         get.return_value = response({"value": []})
         self.assertEqual(
-            self.graph.get_mailbox_messages(page=page),
-            {"emails": [], "next_page": None},
+            self.graph.get_mailbox_messages(),
+            {"emails": []},
         )
-        self.assertEqual(get.call_args.kwargs["params"]["$skip"], "25")
-        self.assertIn("body,", get.call_args.kwargs["params"]["$select"])
+        self.assertIn("body,", get.call_args.args[0].url.params["$select"])
 
-    @patch("crm.graph.requests.get")
-    def test_cursor_tamper_expiry_and_cross_identity(self, get):
-        get.return_value = response(
-            {
-                "value": [],
-                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skiptoken=opaque",
-            }
-        )
-        page = self.graph.get_mailbox_messages()["next_page"]
-        get.reset_mock()
-        for bad in ("", "https://evil.example.com", page + "changed"):
-            with self.subTest(page=bad), self.assertRaises(InvalidCursor):
-                self.graph.get_mailbox_messages(page=bad)
-        get.assert_not_called()
-        for graph in (
-            GraphClient("x", TENANT, user_id=8, provider_id="entraid-work"),
-            GraphClient("x", TENANT, user_id=7, provider_id="other"),
-            GraphClient("x", "other-tenant", user_id=7, provider_id="entraid-work"),
-        ):
-            with self.assertRaises(InvalidCursor):
-                graph.get_mailbox_messages(page=page)
-        with patch(
-            "django.core.signing.time.time",
-            return_value=timezone.now().timestamp() + 3601,
-        ):
-            with self.assertRaises(InvalidCursor):
-                self.graph.get_mailbox_messages(page=page)
-        with self.assertRaises(InvalidCursor):
-            self.graph.get_calendar_view(
-                timezone.now(), timezone.now() + timedelta(days=1), page=page
-            )
-
-    @patch("crm.graph.requests.get")
-    def test_even_signed_cursors_require_the_exact_schema(self, get):
-        for payload in (
-            [],
-            {"context": self.graph._context("inbox")},
-            {"context": self.graph._context("inbox"), "params": {"$skip": 25}},
-            {
-                "context": self.graph._context("inbox"),
-                "params": {"url": "https://evil.example.com"},
-            },
-            {
-                "context": self.graph._context("inbox"),
-                "params": {"$skip": "25", "$filter": "other"},
-            },
-            {
-                "context": self.graph._context("inbox"),
-                "params": {"$skiptoken": "x" * 8193},
-            },
-        ):
-            with self.subTest(payload=payload):
-                cursor = signing.dumps(payload, salt=self.graph.CURSOR_SALT)
-                with self.assertRaises(InvalidCursor):
-                    self.graph.get_mailbox_messages(page=cursor)
-        get.assert_not_called()
-
-    @patch("crm.graph.requests.get")
-    def test_inbox_html_fallback_becomes_text_and_malformed_body_fails_safely(
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
+    def test_inbox_html_fallback_becomes_text(
         self, get
     ):
         get.return_value = response(
@@ -679,33 +670,9 @@ class GraphClientTests(SimpleTestCase):
         self.assertEqual(
             self.graph.get_mailbox_messages()["emails"][0]["body"], "Message"
         )
-        get.return_value = response({"value": [{"body": "not-an-object"}]})
-        with self.assertRaises(GraphClientError):
-            self.graph.get_mailbox_messages()
 
-    @patch("crm.graph.requests.get")
-    def test_pagination_links_cannot_redirect_to_arbitrary_urls_or_resources(self, get):
-        for link in (
-            "https://evil.example.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
-            "https://graph.microsoft.com@evil.example.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
-            "http://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
-            "https://graph.microsoft.com/v1.0/users/other/messages?$skip=25",
-            "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25&redirect=evil",
-            "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25&$skip=50",
-            "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25#fragment",
-            "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25&$top=1000",
-        ):
-            with self.subTest(link=link):
-                get.return_value = response({"value": [], "@odata.nextLink": link})
-                with self.assertRaises(GraphClientError):
-                    self.graph.get_mailbox_messages()
-                self.assertEqual(
-                    get.call_args.args[0],
-                    "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages",
-                )
-
-    @patch("crm.graph.requests.get")
-    def test_calendar_utc_times_and_pagination(self, get):
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
+    def test_calendar_utc_times_and_five_item_preview(self, get):
         start = timezone.datetime(
             2026, 10, 10, 12, tzinfo=timezone.get_fixed_timezone(120)
         )
@@ -725,27 +692,22 @@ class GraphClientTests(SimpleTestCase):
                             "timeZone": "UTC",
                         },
                     }
-                ],
-                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/calendarView?$skip=50",
+                ] * 8,
+                "@odata.nextLink": "not-a-url",
             }
         )
         result = self.graph.get_calendar_view(start, end)
         self.assertEqual(result["events"][0]["starts_at"], "2026-10-10T10:00:00+00:00")
         self.assertEqual(
-            get.call_args.kwargs["params"]["startDateTime"], "2026-10-10T10:00:00+00:00"
+            get.call_args.args[0].url.params["startDateTime"], "2026-10-10T10:00:00+00:00"
         )
         self.assertIn(
-            'outlook.timezone="UTC"', get.call_args.kwargs["headers"]["Prefer"]
+            'outlook.timezone="UTC"', get.call_args.args[0].headers["Prefer"]
         )
-        page = result["next_page"]
-        get.return_value = response({"value": []})
-        self.graph.get_calendar_view(
-            timezone.now(), timezone.now() + timedelta(days=1), page=page
-        )
-        self.assertEqual(get.call_args.kwargs["params"]["$skip"], "50")
-        self.assertEqual(
-            get.call_args.kwargs["params"]["startDateTime"], "2026-10-10T10:00:00+00:00"
-        )
+        self.assertEqual(len(result["events"]), 5)
+        self.assertEqual(set(result), {"events"})
+        self.assertEqual(get.call_args.args[0].url.params["$top"], "5")
+        get.assert_called_once()
 
 
 @override_settings(
@@ -805,7 +767,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             content_type="application/json",
         )
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_normal_allauth_login_captures_real_socialtoken_by_provider_name(self, get):
         self.assertEqual(
             self.client.get("/test/oidc/entraid-work/login/").status_code, 302
@@ -902,7 +864,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         ):
             self.assertNotIn(key, self.client.session)
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_graph_profile_and_picture_are_read_only(self, get):
         self.graph_login()
         get.return_value = response(PROFILE)
@@ -923,7 +885,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.first_name, "Local")
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_graph_profile_email_falls_back_to_upn(self, get):
         self.graph_login()
         get.return_value = response({**PROFILE, "mail": None})
@@ -931,7 +893,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             self.client.get("/api/profile/").json()["email"], "upn@example.com"
         )
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_photo_is_binary_not_stream_of_integer_strings(self, get):
         self.graph_login()
         photo = b"\xff\xd8\x00\xff\x01"
@@ -944,7 +906,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         get.return_value = response(status=404)
         self.assertEqual(self.client.get("/api/graph/picture/").status_code, 404)
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_graph_errors_do_not_trigger_session_expired_contract(self, get):
         self.graph_login()
         UserProfile.objects.create(user=self.user, picture="existing-local-picture.jpg")
@@ -968,7 +930,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 self.assertIsNone(fallback["picture_url"])
                 self.assertIn("graph_error", fallback)
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_graph_personal_responses_are_private_and_not_stored(self, get):
         self.graph_login()
         for path, data in (
@@ -990,7 +952,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 self.assertIn("private", failure["Cache-Control"])
                 self.assertIn("no-store", failure["Cache-Control"])
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_graph_me_identity_mismatch_is_denied(self, get):
         self.graph_login()
         get.return_value = response({**PROFILE, "id": "different-object"})
@@ -1007,11 +969,11 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         session = self.client.session
         session[AUTH_SOURCE_SESSION_KEY] = "other"
         session.save()
-        with patch("crm.graph.requests.get") as get:
+        with patch("httpx.AsyncHTTPTransport.handle_async_request") as get:
             self.assertEqual(self.client.get("/api/graph/inbox/").status_code, 403)
         get.assert_not_called()
 
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_calendar_input_validation_and_utc_contract(self, get):
         self.graph_login()
         get.return_value = response({"value": []})
@@ -1040,13 +1002,13 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 "end": "2026-10-11T12:00:00+02:00",
             },
         )
-        self.assertEqual(result.json(), {"events": [], "next_page": None})
+        self.assertEqual(result.json(), {"events": []})
         self.assertEqual(
-            get.call_args.kwargs["params"]["startDateTime"], "2026-10-10T10:00:00+00:00"
+            get.call_args.args[0].url.params["startDateTime"], "2026-10-10T10:00:00+00:00"
         )
 
-    @patch("crm.graph.requests.get")
-    def test_inbox_endpoint_accepts_signed_page_not_arbitrary_url(self, get):
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
+    def test_preview_endpoints_ignore_page_parameters(self, get):
         self.graph_login()
         get.return_value = response(
             {
@@ -1054,27 +1016,22 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
                 "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages?$skip=25",
             }
         )
-        page = self.client.get("/api/graph/inbox/").json()["next_page"]
-        get.return_value = response({"value": []})
-        self.assertEqual(
-            self.client.get("/api/graph/inbox/", {"page": page}).json(),
-            {"emails": [], "next_page": None},
-        )
-        self.assertEqual(get.call_args.kwargs["params"]["$skip"], "25")
-        get.reset_mock()
-        self.assertEqual(
-            self.client.get(
-                "/api/graph/inbox/",
-                {
-                    "page": "https://evil.example.com/steal",
-                },
-            ).status_code,
-            400,
-        )
-        get.assert_not_called()
+        for endpoint, field in (("inbox", "emails"), ("calendar", "events")):
+            with self.subTest(endpoint=endpoint):
+                get.reset_mock()
+                result = self.client.get(
+                    f"/api/graph/{endpoint}/", {"page": "https://evil.example.com/steal"}
+                )
+                self.assertEqual(result.json(), {field: []})
+                get.assert_called_once()
+                request = get.call_args.args[0]
+                self.assertEqual(request.url.host, "graph.microsoft.com")
+                self.assertEqual(request.url.params["$top"], "5")
+                self.assertNotIn("$skip", request.url.params)
+                self.assertNotIn("$skiptoken", request.url.params)
 
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_refresh_rotates_session_credentials_and_checks_identity(self, get, post):
         self.graph_login(expires_in=-1)
         get.return_value = response(PROFILE)
@@ -1120,14 +1077,14 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             ("session-refresh",),
         )
         self.assertEqual(
-            get.call_args.kwargs["headers"]["Authorization"],
+            get.call_args.args[0].headers["Authorization"],
             "Bearer " + "renewed-access",
         )
         self.client.get("/api/graph/profile/")
         post.assert_called_once()
 
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_refresh_preserves_old_refresh_token_when_not_rotated(self, get, post):
         self.graph_login(expires_in=-1)
         get.return_value = response(PROFILE)
@@ -1143,7 +1100,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         )
 
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_graph_session_bindings_are_checked_before_using_cached_tokens(self, get, client):
         get.return_value = response(PROFILE)
         for field, value in (
@@ -1163,7 +1120,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         get.assert_not_called()
 
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_browser_oidc_sessions_without_linked_oid_remain_usable_and_refreshable(
         self, get, application
     ):
@@ -1211,7 +1168,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
 
     @patch("crm.teams.auth._get_jwks")
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_obo_cache_survives_login_and_refreshes_without_returned_refresh_token(
         self, get, application, keys
     ):
@@ -1258,7 +1215,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
             self.client.session["graph_tokens"]["entraid-work"]["msal_cache"],
         )
         self.assertEqual(
-            get.call_args.kwargs["headers"]["Authorization"],
+            get.call_args.args[0].headers["Authorization"],
             "Bearer " + "refreshed-obo-access",
         )
 
@@ -1307,7 +1264,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
         )
 
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_refresh_failure_redirect_or_mismatch_does_not_expose_credentials(
         self, get, post
     ):
@@ -1334,7 +1291,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
 
     @patch("crm.teams.auth._get_jwks")
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_sso_second_account_nested_identity_different_sub_and_obo(
         self, get, post, keys
     ):
@@ -1392,7 +1349,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
 
     @patch("crm.teams.auth._get_jwks")
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_sso_obo_graph_identity_mismatch_does_not_login(self, get, post, keys):
         keys.return_value = self.jwks
         post.return_value.acquire_token_on_behalf_of.return_value = {
@@ -1609,7 +1566,7 @@ class GraphIntegrationTests(SignedTokenMixin, TestCase):
 
     @patch("crm.teams.auth._get_jwks")
     @patch("crm.teams.auth.msal.ConfidentialClientApplication")
-    @patch("crm.graph.requests.get")
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
     def test_fresh_teams_config_cookie_supports_csrf_protected_sso(
         self, get, post, keys
     ):

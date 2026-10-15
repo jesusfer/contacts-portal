@@ -464,7 +464,7 @@ class GraphTokenManager:
                 token_cache=token_cache,
             )
             if token.get("oid"):
-                profile = GraphClient(refreshed["access_token"], tenant).get_profile()
+                profile = GraphClient(refreshed["access_token"]).get_profile()
                 if profile.get("id") != token["oid"]:
                     raise TokenExpiredError("Graph identity mismatch. Sign in again.")
         except TokenExpiredError:

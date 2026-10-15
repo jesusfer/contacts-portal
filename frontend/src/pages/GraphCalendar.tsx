@@ -1,10 +1,10 @@
-// Displays Microsoft Graph calendar events with month navigation and paging.
-import { useState } from 'preact/hooks'
-import { useGraphPages } from '../hooks/useGraphPages.ts'
-import { dateTime } from '../utils/data.ts'
+// Displays up to five Microsoft Graph calendar events with month navigation.
+import { useMemo, useState } from 'preact/hooks'
+import { dateTime, useResource } from '../utils/data.ts'
 import { Empty } from '../components/Empty.tsx'
 import { GraphLink } from '../components/GraphLink.tsx'
-import { GraphPagination } from '../components/GraphPagination.tsx'
+import { Loading } from '../components/Loading.tsx'
+import { ErrorNotice } from '../components/ErrorNotice.tsx'
 import { PageHeading } from '../components/PageHeading.tsx'
 import { Panel } from '../components/Panel.tsx'
 
@@ -12,23 +12,33 @@ export function GraphCalendar({ version, compact = false }) {
   const [month, setMonth] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   )
-  const start = month.toISOString(),
-    end = new Date(month.getFullYear(), month.getMonth() + 1, 1).toISOString()
-  const resource = useGraphPages(
+  const start = useMemo(() => {
+    const now = new Date()
+    return compact &&
+      month.getFullYear() === now.getFullYear() &&
+      month.getMonth() === now.getMonth()
+      ? now.toISOString()
+      : month.toISOString()
+  }, [month, compact, version])
+  const end = new Date(month.getFullYear(), month.getMonth() + 1, 1).toISOString()
+  const resource = useResource(
     `graph/calendar/?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
-    'events',
     version,
   )
+  const events = resource.data?.events || []
   const navigate = (offset) =>
     setMonth((value) => new Date(value.getFullYear(), value.getMonth() + offset, 1))
   return (
     <>
       {!compact && (
-        <PageHeading title="Calendar" subtitle="Your Microsoft calendar. Events are read-only." />
+        <PageHeading
+          title="Calendar"
+          subtitle="Up to 5 events for the selected month. Read-only."
+        />
       )}
       <Panel
         title={compact ? 'Coming up next · Microsoft calendar' : 'Microsoft calendar'}
-        count={resource.items.length}
+        count={events.length}
         action={
           compact && (
             <a class="button quiet" href="#/calendar">
@@ -48,7 +58,7 @@ export function GraphCalendar({ version, compact = false }) {
             →
           </button>
         </div>
-        {resource.items
+        {events
           .slice()
           .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
           .filter((event) => !compact || new Date(event.ends_at) >= new Date())
@@ -64,12 +74,13 @@ export function GraphCalendar({ version, compact = false }) {
               </div>
             </div>
           ))}
-        {!resource.loading && !resource.error && !resource.items.length && (
+        {!resource.loading && !resource.error && !events.length && (
           <Empty title="No Microsoft events" icon="calendar">
             There are no events for this month.
           </Empty>
         )}
-        <GraphPagination resource={resource} />
+        {resource.loading && <Loading />}
+        <ErrorNotice error={resource.error} retry={resource.retry} />
       </Panel>
     </>
   )

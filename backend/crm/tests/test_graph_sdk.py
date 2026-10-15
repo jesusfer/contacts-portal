@@ -1,63 +1,54 @@
-from unittest.mock import Mock, patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import httpx
-from asgiref.sync import async_to_sync
 from django.test import SimpleTestCase
 
-from ..graph import GraphClient, GraphClientError, TokenExpiredError, _GraphTransport
+from ..graph import GraphClient, GraphClientError, TokenExpiredError
 
 
 class GraphSDKTests(SimpleTestCase):
-    @patch("crm.graph.requests.get")
-    def test_sdk_operations_use_delegated_bearer_and_bounded_transport(self, get):
-        response = Mock(status_code=200, headers={})
-        get.return_value = response
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
+    def test_sdk_operations_use_delegated_bearer_and_bounded_transport(self, send):
         client = GraphClient("delegated-token")
-        for endpoint in (
-            "/me",
-            "/me/photo/$value",
-            "/me/calendarView",
-            "/me/mailFolders('inbox')/messages",
-            "/me/presence",
+        start = datetime.now(timezone.utc)
+        for operation, endpoint, data in (
+            (client.get_profile, "/me", {"id": "user"}),
+            (client.get_photo, "/me/photo/$value", None),
+            (lambda: client.get_calendar_view(start, start + timedelta(days=1)), "/me/calendarView", {"value": []}),
+            (client.get_mailbox_messages, "/me/mailFolders/inbox/messages", {"value": []}),
+            (client.get_presence, "/me/presence", {}),
         ):
             with self.subTest(endpoint=endpoint):
-                self.assertIs(
-                    client._request(endpoint, {"$skiptoken": "opaque+/= value"}),
-                    response,
+                send.return_value = (
+                    httpx.Response(200, content=b"photo")
+                    if endpoint == "/me/photo/$value"
+                    else httpx.Response(200, json=data)
                 )
-                args, kwargs = get.call_args
-                self.assertEqual(args, (client.GRAPH_BASE + endpoint,))
-                self.assertEqual(kwargs["params"], {"$skiptoken": "opaque+/= value"})
-                self.assertEqual(
-                    kwargs["headers"]["Authorization"], "Bearer " + "delegated-token"
+                operation()
+                request = send.call_args.args[0]
+                self.assertEqual(request.url.host, "graph.microsoft.com")
+                self.assertEqual(request.url.path, "/v1.0" + endpoint)
+                self.assertEqual(request.method, "GET")
+                self.assertEqual(request.headers["Authorization"], "Bearer " + "delegated-token")
+                self.assertTrue(all(value == 10 for value in request.extensions["timeout"].values()))
+
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
+    def test_redirects_and_throttling_do_not_send_additional_requests(self, send):
+        for status in (302, 429, 503):
+            with self.subTest(status=status):
+                send.reset_mock()
+                send.return_value = httpx.Response(
+                    status,
+                    headers={"Location": "https://evil.example/steal", "Retry-After": "1"},
+                    json={"error": {"code": "unavailable", "message": "private"}},
                 )
-                self.assertEqual(kwargs["timeout"], 10)
-                self.assertIs(kwargs["allow_redirects"], False)
+                with self.assertRaises(GraphClientError):
+                    GraphClient("delegated-token").get_profile()
+                send.assert_called_once()
 
-    @patch("crm.graph.requests.get")
-    def test_unknown_operations_never_send_credentials(self, get):
-        for endpoint in ("/users/other", "//evil.example/me", "/me/../users/other"):
-            with self.subTest(endpoint=endpoint), self.assertRaises(GraphClientError):
-                GraphClient("delegated-token")._request(endpoint)
-        get.assert_not_called()
-
-    @patch("crm.graph.requests.get")
-    def test_transport_restricts_destination_and_method(self, get):
-        for method, url in (
-            ("GET", "https://evil.example/v1.0/me"),
-            ("GET", "http://graph.microsoft.com/v1.0/me"),
-            ("GET", "https://graph.microsoft.com/v1.0/users/other"),
-            ("GET", "https://user@graph.microsoft.com/v1.0/me"),
-            ("POST", "https://graph.microsoft.com/v1.0/me"),
-        ):
-            with self.subTest(url=url, method=method), self.assertRaises(GraphClientError):
-                async_to_sync(_GraphTransport().handle_async_request)(
-                    httpx.Request(method, url)
-                )
-        get.assert_not_called()
-
-    @patch("crm.graph.requests.get")
-    def test_missing_delegated_token_requires_authorization(self, get):
+    @patch("httpx.AsyncHTTPTransport.handle_async_request")
+    def test_missing_delegated_token_requires_authorization(self, send):
         with self.assertRaises(TokenExpiredError):
             GraphClient("").get_profile()
-        get.assert_not_called()
+        send.assert_not_called()

@@ -25,7 +25,7 @@ from .forms import AppointmentForm, CallForm, CompanyForm, ContactForm, EmailFor
 from .models import Agent, Appointment, Call, Company, Contact, Email, UserProfile
 from .pictures import normalize_picture
 from .signals import AUTH_SOURCE_SESSION_KEY
-from .graph import GraphClient, GraphClientError, InvalidCursor, TokenExpiredError
+from .graph import GraphClient, GraphClientError, TokenExpiredError
 from .teams.auth import GraphTokenManager, graph_provider
 
 
@@ -68,8 +68,6 @@ def api(methods, *, agent_required=True):
                 )
             except GraphClientError as exc:
                 return error(exc.public_message, exc.status)
-            except InvalidCursor:
-                return error("Invalid or expired page cursor.", 400)
             except (SuspiciousOperation, MultiPartParserError):
                 return error("Malformed or oversized request.", 400)
 
@@ -638,15 +636,8 @@ def _get_graph_client(request):
     provider_id = request.session.get(AUTH_SOURCE_SESSION_KEY)
     if not graph_enabled(request):
         raise TokenExpiredError("Graph authorization required. Sign in again.")
-    app = graph_provider(provider_id)
     token = GraphTokenManager.get_token(request, provider_id)
-    tenant = request.session[GraphTokenManager.SESSION_KEY][provider_id]["tenant_id"]
-    return GraphClient(
-        token,
-        tenant,
-        user_id=request.user.pk,
-        provider_id=provider_id,
-    )
+    return GraphClient(token)
 
 
 def graph_profile_json(request, details=None):
@@ -728,7 +719,6 @@ def graph_calendar(request):
         _get_graph_client(request).get_calendar_view(
             start_dt,
             end_dt,
-            page=request.GET.get("page"),
         )
     )
 
@@ -738,7 +728,7 @@ def graph_inbox(request):
     if not request.user.is_authenticated:
         return error("Authentication required.", 401)
     return JsonResponse(
-        _get_graph_client(request).get_mailbox_messages(page=request.GET.get("page"))
+        _get_graph_client(request).get_mailbox_messages()
     )
 
 

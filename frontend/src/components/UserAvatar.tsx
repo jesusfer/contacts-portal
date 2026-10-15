@@ -2,9 +2,11 @@
 import { useEffect, useState } from 'preact/hooks'
 import * as TeamsGraph from '../teams-graph.ts'
 import { initials } from '../utils/data.ts'
+
 export function UserAvatar({ user, revision, large = false }) {
   const [failedSource, setFailedSource] = useState('')
   const [graphPhoto, setGraphPhoto] = useState('')
+
   useEffect(() => {
     if (!TeamsGraph.teamsGraphActive() || user.picture_url !== '/api/graph/picture/') return
     let active = true,
@@ -24,6 +26,7 @@ export function UserAvatar({ user, revision, large = false }) {
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [user.id, user.picture_url, revision])
+
   const isLocalProfile = user.picture_url === '/api/profile/picture/'
   const isGraphProfile = user.picture_url === '/api/graph/picture/'
   const source = isLocalProfile
@@ -33,6 +36,7 @@ export function UserAvatar({ user, revision, large = false }) {
         ? graphPhoto
         : user.picture_url
       : ''
+
   return (
     <span class={`avatar user-avatar${large ? ' profile-avatar' : ''}`}>
       {source && source !== failedSource ? (
