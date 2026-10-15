@@ -11,6 +11,7 @@ import { GraphInbox } from './pages/GraphInbox.tsx'
 import { Inbox } from './pages/Inbox.tsx'
 import { Login } from './pages/Login.tsx'
 import { Profile } from './pages/Profile.tsx'
+
 export function AppRoutes({ workspace, pages }) {
   const Page = pages[location.pathname]
   return Page ? <Page /> : workspace
