@@ -332,6 +332,13 @@ class APIExtensionPackageTests(SimpleTestCase):
         self.assertEqual(extension["composeExtensionType"], "apiBased")
         self.assertNotIn("botId", extension)
         self.assertEqual(
+            manifest["webApplicationInfo"],
+            {
+                "id": "<TEAMS_SSO_APP_ID>",
+                "resource": "api://<PORTAL_HOST>/<TEAMS_SSO_APP_ID>",
+            },
+        )
+        self.assertEqual(
             extension["apiSpecificationFile"], "contact-search-openapi.json"
         )
         self.assertEqual(extension["authorization"]["authType"], "microsoftEntra")
