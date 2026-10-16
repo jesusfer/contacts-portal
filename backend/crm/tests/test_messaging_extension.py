@@ -17,7 +17,7 @@ from PIL import Image
 from microsoft_teams.api import InvokeResponse, MessagingExtensionAttachment
 from microsoft_teams.cards import AdaptiveCard, Choice, ChoiceSetInput, SubmitAction
 
-from .manifest_assertions import assert_sso_resource_matches_manifest_features
+from .manifest_assertions import assert_sso_resource_is_valid
 from ..teams.messaging_extension.action import (
     SUMMARY_LIMIT,
     _choice_step,
@@ -1058,7 +1058,7 @@ class MessagingExtensionManifestTests(SimpleTestCase):
 
     def test_manifest_sso_uses_portal_application_not_bot_application(self):
         manifest = self.manifest()
-        assert_sso_resource_matches_manifest_features(self, manifest)
+        assert_sso_resource_is_valid(self, manifest)
         self.assertEqual(manifest["id"], "<TEAMS_APP_ID>")
         self.assertEqual(
             manifest["composeExtensions"][0]["botId"], "<TEAMS_BOT_APP_ID>"

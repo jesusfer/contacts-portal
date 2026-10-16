@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from .manifest_assertions import assert_sso_resource_matches_manifest_features
+from .manifest_assertions import assert_sso_resource_is_valid
 from ..teams.messaging_extension.api import RESULT_LIMIT, SUMMARY_LIMIT
 from ..teams.messaging_extension.search import CARD_BYTE_LIMIT
 from ..models import Agent, Appointment, Call, Company, Contact
@@ -363,7 +363,7 @@ class APIExtensionPackageTests(SimpleTestCase):
         (extension,) = manifest["composeExtensions"]
         self.assertEqual(extension["composeExtensionType"], "apiBased")
         self.assertNotIn("botId", extension)
-        assert_sso_resource_matches_manifest_features(self, manifest)
+        assert_sso_resource_is_valid(self, manifest)
         self.assertEqual(
             extension["apiSpecificationFile"], "contact-search-openapi.json"
         )
