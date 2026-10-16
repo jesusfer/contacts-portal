@@ -12,11 +12,14 @@ let client
  */
 export async function startTeamsGraph(provider, expectedId, signal) {
   clearTeamsGraph()
+
   const [{ App }, me] = await Promise.all([
     import('@microsoft/teams.client'),
     import('@microsoft/teams.graph-endpoints/me'),
   ])
+
   signal?.throwIfAborted()
+
   const app = new App(provider.client_id, {
     msalOptions: {
       prewarmScopes: scopes,
@@ -31,20 +34,26 @@ export async function startTeamsGraph(provider, expectedId, signal) {
       },
     },
   })
+
   await app.start()
+
   signal?.throwIfAborted()
+
   let result: { account?: { tenantId?: string } | null }
   try {
     result = await app.msalInstance.acquireTokenSilent({ scopes })
   } catch {
     result = await app.msalInstance.acquireTokenPopup({ scopes })
   }
+
   if (result.account?.tenantId !== provider.tenant_id) {
     throw new Error('Microsoft Graph tenant does not match the Teams identity.')
   }
+
   app.msalInstance.setActiveAccount(
     result.account as Parameters<typeof app.msalInstance.setActiveAccount>[0],
   )
+
   const profile = (await app.graph.call(me.get, { $select: ['id'] })) as { id?: string }
   if (!expectedId || profile.id !== expectedId)
     throw new Error('Microsoft Graph identity does not match the Teams identity.')
@@ -96,7 +105,11 @@ export async function teamsGraphRequest(path: string, { signal }: { signal?: Abo
       headers: { Prefer: 'outlook.timezone="UTC", outlook.body-content-type="text"' },
     },
   }
-  if (url.pathname === '/graph/presence/') return app.graph.call(me.presence.get, {}, options)
+
+  if (url.pathname === '/graph/presence/') {
+    return app.graph.call(me.presence.get, {}, options)
+  }
+
   if (['/graph/profile/', '/profile/'].includes(url.pathname)) {
     const data = await app.graph.call(
       me.get,
@@ -114,6 +127,7 @@ export async function teamsGraphRequest(path: string, { signal }: { signal?: Abo
       graph_enabled: true,
     }
   }
+
   let endpoint, params, operation
   if (url.pathname === '/graph/calendar/') {
     endpoint = '/me/calendarView'
@@ -136,6 +150,7 @@ export async function teamsGraphRequest(path: string, { signal }: { signal?: Abo
   } else {
     throw new Error('Unsupported Microsoft Graph request.')
   }
+
   const data = await app.graph.call(operation, { ...params, 'mailFolder-id': 'inbox' }, options)
   if (!Array.isArray(data.value)) throw new Error('Invalid Microsoft Graph response.')
   if (endpoint === '/me/calendarView')

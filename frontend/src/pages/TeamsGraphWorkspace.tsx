@@ -8,13 +8,15 @@ import { GraphCalendar } from './GraphCalendar.tsx'
 import { GraphInbox } from './GraphInbox.tsx'
 
 export function TeamsGraphWorkspace({ user, error, opening, openDashboard }) {
-  const [route, setRoute] = useState(location.hash.slice(1)),
-    [version, setVersion] = useState(0)
+  const [route, setRoute] = useState(location.hash.slice(1))
+  const [version, setVersion] = useState(0)
+
   useEffect(() => {
     const changed = () => setRoute(location.hash.slice(1))
     window.addEventListener('hashchange', changed)
     return () => window.removeEventListener('hashchange', changed)
   }, [])
+
   return (
     <main class="content">
       <PageHeading

@@ -15,11 +15,13 @@ export function TeamsCustomerTab() {
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true),
     [attempt, setAttempt] = useState(0)
+
   useEffect(() => {
     let active = true
     setData(null)
     setError('')
     setLoading(true)
+
     async function load() {
       try {
         const query = new URLSearchParams(location.search)
@@ -48,6 +50,7 @@ export function TeamsCustomerTab() {
       active = false
     }
   }, [attempt])
+
   return (
     <main class="content">
       <PageHeading

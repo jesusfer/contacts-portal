@@ -190,7 +190,9 @@ def handle_action(agent, name, value):
     if not isinstance(value, dict) or value.get("commandId") != ACTION_COMMAND_ID:
         return InvokeResponse(status=400)
     if name == "composeExtension/fetchTask":
+        # 1st step
         return customer_step(agent, message_text(value.get("messagePayload")))
+    # composeExtension/submitAction
     data = value.get("data")
     if not isinstance(data, dict):
         return InvokeResponse(status=400)
@@ -200,8 +202,10 @@ def handle_action(agent, name, value):
     message = message[:SUMMARY_LIMIT]
     step = data.get("step")
     if step == "customer":
+        # 2nd step
         company = agent.companies.filter(pk=_pk(data.get("customer_id"))).first()
         return contact_step(company, message) if company else InvokeResponse(status=404)
+    # 3rd step
     contact = Contact.objects.filter(
         pk=_pk(data.get("contact_id")), company__in=agent.companies.all()
     ).first()
@@ -216,6 +220,7 @@ def handle_action(agent, name, value):
         if not call:
             return InvokeResponse(status=404)
         if step == "call":
+            # 4th step
             return summary_step(call, message)
         summary = data.get("summary")
         if (

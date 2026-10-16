@@ -9,9 +9,11 @@ export function UserAvatar({ user, revision, large = false }) {
 
   useEffect(() => {
     if (!TeamsGraph.teamsGraphActive() || user.picture_url !== '/api/graph/picture/') return
+
     let active = true,
       objectUrl
     const controller = new AbortController()
+
     TeamsGraph.teamsGraphPhoto(controller.signal)
       .then((blob) => {
         if (active && blob) {
